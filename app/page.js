@@ -24,18 +24,23 @@ export default function Page() {
 
   async function load() {
     setErr('');
-    const res = await fetch('/api/data');
-    if (res.status === 401) {
-      setNeedCode(true);
-      return;
+    try {
+      const res = await fetch('/api/data', { cache: 'no-store' });
+      if (res.status === 401) {
+        setNeedCode(true);
+        setData(null);
+        return;
+      }
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr(j.error || `Не загрузилось (${res.status})`);
+        return;
+      }
+      setNeedCode(false);
+      setData(j);
+    } catch (e) {
+      setErr('Нет связи с сервером. Проверь интернет и нажми «Ещё раз».');
     }
-    const j = await res.json();
-    if (!res.ok) {
-      setErr(j.error || 'Не загрузилось');
-      return;
-    }
-    setNeedCode(false);
-    setData(j);
   }
 
   useEffect(() => {
