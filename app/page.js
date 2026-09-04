@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from 'react';
 
-const TODAY = () => new Date().toISOString().slice(0, 10);
+const TODAY = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
+};
 
 async function post(kind, payload) {
   const res = await fetch('/api/log', {
@@ -288,19 +293,26 @@ function Gym({ data, reload, back }) {
 
 function Sleep({ data, reload, back }) {
   const s = data.sleep;
-  const today = data.today;
+  const today = TODAY();
   const todayRow = s.days.find((d) => d.d === today) || {};
-  const [note, setNote] = useState(todayRow.note || '');
+  const [note, setNote] = useState('');
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!dirty) setNote(todayRow.note || '');
+  }, [todayRow.note, dirty]);
 
   async function mark(key, val) {
     setBusy(true);
     try {
       await post('day', {
         d: today,
-        morning: key === 'morning' ? val : todayRow.morning ?? null,
-        evening: key === 'evening' ? val : todayRow.evening ?? null,
+        morning: todayRow.morning ?? null,
+        evening: todayRow.evening ?? null,
+        charge: todayRow.charge ?? null,
         note: todayRow.note ?? null,
+        [key]: todayRow[key] === val ? null : val,
       });
       await reload();
     } finally {
@@ -315,8 +327,10 @@ function Sleep({ data, reload, back }) {
         d: today,
         morning: todayRow.morning ?? null,
         evening: todayRow.evening ?? null,
+        charge: todayRow.charge ?? null,
         note,
       });
+      setDirty(false);
       await reload();
     } finally {
       setBusy(false);
@@ -324,6 +338,12 @@ function Sleep({ data, reload, back }) {
   }
 
   const cls = (v) => 'cell' + (v === true ? ' on' : v === false ? ' off' : '');
+
+  const rows = [
+    ['morning', 'Утро без телефона'],
+    ['evening', 'Вечер без ленты'],
+    ['charge', 'Зарядка'],
+  ];
 
   return (
     <>
@@ -333,13 +353,41 @@ function Sleep({ data, reload, back }) {
         <div className="sub">телефон ночует на столе</div>
       </div>
 
-      <Stat label="Утро без телефона" value={`${s.morningStreak} дней подряд`} />
-      <Stat label="Вечер без ленты" value={`${s.eveningStreak} дней подряд`} />
-      <Stat
-        label="Позиции под защитой"
-        value={`${s.protectedOpen} из ${s.totalOpen}`}
-        warn={s.totalOpen > s.protectedOpen}
-      />
+      <div className="section" style={{ marginTop: 0 }}>
+        <h2>Сегодня</h2>
+        {rows.map(([key, label]) => (
+          <div className="day-row" key={key}>
+            <span className="name">{label}</span>
+            <div className="seg">
+              <button
+                disabled={busy}
+                className={todayRow[key] === true ? 'yes' : ''}
+                onClick={() => mark(key, true)}
+              >
+                Да
+              </button>
+              <button
+                disabled={busy}
+                className={todayRow[key] === false ? 'no' : ''}
+                onClick={() => mark(key, false)}
+              >
+                Нет
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="section">
+        <Stat label="Утро без телефона" value={`${s.morningStreak} дней подряд`} />
+        <Stat label="Вечер без ленты" value={`${s.eveningStreak} дней подряд`} />
+        <Stat label="Зарядка" value={`${s.chargeStreak ?? 0} дней подряд`} />
+        <Stat
+          label="Позиции под защитой"
+          value={`${s.protectedOpen} из ${s.totalOpen}`}
+          warn={s.totalOpen > s.protectedOpen}
+        />
+      </div>
 
       <div className="section">
         <h2>Утро</h2>
@@ -360,45 +408,24 @@ function Sleep({ data, reload, back }) {
       </div>
 
       <div className="section">
-        <h2>Сегодня</h2>
-        <div className="toggle" style={{ marginBottom: 10 }}>
-          <button
-            disabled={busy}
-            className={todayRow.morning === true ? 'sel' : ''}
-            onClick={() => mark('morning', true)}
-          >
-            Утро получилось
-          </button>
-          <button
-            disabled={busy}
-            className={todayRow.morning === false ? 'sel' : ''}
-            onClick={() => mark('morning', false)}
-          >
-            Нет
-          </button>
-        </div>
-        <div className="toggle">
-          <button
-            disabled={busy}
-            className={todayRow.evening === true ? 'sel' : ''}
-            onClick={() => mark('evening', true)}
-          >
-            Вечер получился
-          </button>
-          <button
-            disabled={busy}
-            className={todayRow.evening === false ? 'sel' : ''}
-            onClick={() => mark('evening', false)}
-          >
-            Нет
-          </button>
+        <h2>Зарядка</h2>
+        <div className="grid">
+          {s.days.map((d) => (
+            <span key={'c' + d.d} title={d.d} className={cls(d.charge)} />
+          ))}
         </div>
       </div>
 
       <div className="section">
         <h2>Заметка, если есть что сказать</h2>
-        <textarea value={note} onChange={(e) => setNote(e.target.value)} />
-        <button className="btn ghost" disabled={busy} onClick={saveNote}>
+        <textarea
+          value={note}
+          onChange={(e) => {
+            setNote(e.target.value);
+            setDirty(true);
+          }}
+        />
+        <button className="btn ghost" disabled={busy || !dirty} onClick={saveNote}>
           Сохранить
         </button>
       </div>
