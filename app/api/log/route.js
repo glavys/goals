@@ -42,6 +42,7 @@ export async function POST(request) {
         d: payload.d,
         morning: payload.morning ?? null,
         evening: payload.evening ?? null,
+        charge: payload.charge ?? null,
         note: payload.note ?? null,
         updated_at: new Date().toISOString(),
       },
