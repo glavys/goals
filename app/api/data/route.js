@@ -54,7 +54,7 @@ export async function GET() {
 
   const sessions = (wRes.data || [])
     .filter((w) => (w.duration || 0) >= GYM_MIN_MINUTES)
-    .map((w) => w.date)
+    .map((w) => String(w.date).slice(0, 10))
     .sort();
 
   const thisMonday = mondayOf(today);
