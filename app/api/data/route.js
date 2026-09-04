@@ -37,7 +37,7 @@ export async function GET() {
       .from('workouts')
       .select('date, duration')
       .gte('date', SEASON_START)
-      .lte('date', SEASON_END),
+      .lt('date', '2027-01-01'),
     supabase.from('goals_trades').select('*').order('date', { ascending: false }),
     supabase.from('goals_balance').select('*').order('week_start', { ascending: true }),
     supabase.from('goals_days').select('*').gte('d', iso(new Date(Date.now() - 40 * 86400000))),
