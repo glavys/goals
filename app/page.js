@@ -433,80 +433,96 @@ function Sleep({ data, reload, back }) {
   );
 }
 
+// ——— Cash ———————————————————————————————————————————————
+
+// Цена: у BTC и у мелких монет разный масштаб, поэтому знаки после
+// запятой подбираются под число, а не задаются жёстко.
+function fmtPrice(v) {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  const digits = Math.abs(n) >= 100 ? 2 : Math.abs(n) >= 1 ? 4 : 8;
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: digits });
+}
+
+function fmtUsd(v) {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  const s = Math.abs(n).toLocaleString('ru-RU', { maximumFractionDigits: 0 });
+  return (n > 0 ? '+$' : n < 0 ? '−$' : '$') + s;
+}
+
+function fmtR(r) {
+  if (r === null || r === undefined) return null;
+  return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r).toFixed(1) + 'R';
+}
+
+// То же, что tradeMath на сервере, но для живого предпросмотра в форме.
+function preview({ direction, size_usd, entry_price, stop_price, price }) {
+  const entry = Number(entry_price);
+  const stop = Number(stop_price);
+  const size = Number(size_usd);
+  const p = Number(price);
+  if (!entry || !size || !p) return null;
+  const sign = direction === 'short' ? -1 : 1;
+  const result = (size * sign * (p - entry)) / entry;
+  const risk = stop ? Math.abs((size * (entry - stop)) / entry) : null;
+  return { result, r: risk ? result / risk : null };
+}
+
+const DIR = { long: 'лонг', short: 'шорт' };
+
 function Cash({ data, reload, back }) {
   const c = data.cash;
   const [tab, setTab] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [bal, setBal] = useState('');
-  const [t, setT] = useState({
+
+  const blank = {
     date: TODAY(),
     instrument: '',
+    direction: 'long',
     size_usd: '',
-    result_usd: '',
-    is_open: true,
+    entry_price: '',
+    take_price: '',
+    stop_price: '',
+    thesis: '',
     by_system: true,
-    take_by_rule: false,
-    protected: false,
-    feeling: '',
-  });
+  };
+  const [t, setT] = useState(blank);
 
-  async function saveTrade() {
-    if (!t.instrument.trim()) {
-      setMsg('Впиши инструмент');
-      return;
-    }
+  async function openTrade() {
     setBusy(true);
+    setMsg('');
     try {
-      await post('trade', {
-        ...t,
-        size_usd: t.size_usd === '' ? null : Number(t.size_usd),
-        result_usd: t.result_usd === '' ? null : Number(t.result_usd),
-      });
-      setT({ ...t, instrument: '', size_usd: '', result_usd: '', feeling: '' });
+      await post('trade_open', t);
+      setT({ ...blank, date: t.date });
       setTab(null);
-      setMsg('');
       await reload();
+    } catch (e) {
+      setMsg(e.message);
     } finally {
       setBusy(false);
     }
   }
 
   async function saveBalance() {
-    if (bal === '') {
-      setMsg('Впиши сумму');
-      return;
-    }
     setBusy(true);
+    setMsg('');
     try {
       await post('balance', { week_start: c.weekStart, total_usd: Number(bal) });
       setBal('');
       setTab(null);
-      setMsg('');
       await reload();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleProtected(tr) {
-    setBusy(true);
-    try {
-      await post('trade_update', {
-        id: tr.id,
-        protected: !tr.protected,
-        is_open: tr.is_open,
-        result_usd: tr.result_usd,
-        take_by_rule: tr.take_by_rule,
-        review: tr.review,
-      });
-      await reload();
+    } catch (e) {
+      setMsg(e.message);
     } finally {
       setBusy(false);
     }
   }
 
   const pct = c.latest ? Math.min(100, (c.latest / 50000) * 100) : 0;
+  const plan = preview({ ...t, price: t.take_price });
 
   return (
     <>
@@ -532,22 +548,31 @@ function Cash({ data, reload, back }) {
         <Stat label="Фиксация по правилу" value={`${c.takeByRule} из ${c.closedMonth}`} />
         <Stat
           label="Позиции под защитой"
-          value={`${data.sleep.protectedOpen} из ${data.sleep.totalOpen}`}
-          warn={data.sleep.totalOpen > data.sleep.protectedOpen}
+          value={`${c.open.filter((o) => o.is_protected).length} из ${c.open.length}`}
+          warn={c.open.some((o) => !o.is_protected)}
         />
+        {c.rMonth !== null && (
+          <Stat label="Результат месяца" value={fmtR(c.rMonth)} />
+        )}
       </div>
 
       <div className="section">
         <div className="toggle">
           <button
             className={tab === 'trade' ? 'sel' : ''}
-            onClick={() => setTab(tab === 'trade' ? null : 'trade')}
+            onClick={() => {
+              setTab(tab === 'trade' ? null : 'trade');
+              setMsg('');
+            }}
           >
-            Записать сделку
+            Открыть позицию
           </button>
           <button
             className={tab === 'bal' ? 'sel' : ''}
-            onClick={() => setTab(tab === 'bal' ? null : 'bal')}
+            onClick={() => {
+              setTab(tab === 'bal' ? null : 'bal');
+              setMsg('');
+            }}
           >
             Баланс за неделю
           </button>
@@ -563,45 +588,58 @@ function Cash({ data, reload, back }) {
           />
           <input
             type="text"
-            placeholder="Инструмент"
+            placeholder="Тикер"
             value={t.instrument}
-            onChange={(e) => {
-              setT({ ...t, instrument: e.target.value });
-              setMsg('');
-            }}
+            onChange={(e) => setT({ ...t, instrument: e.target.value })}
           />
+          <div className="toggle" style={{ marginBottom: 10 }}>
+            <button
+              className={t.direction === 'long' ? 'sel' : ''}
+              onClick={() => setT({ ...t, direction: 'long' })}
+            >
+              Лонг
+            </button>
+            <button
+              className={t.direction === 'short' ? 'sel' : ''}
+              onClick={() => setT({ ...t, direction: 'short' })}
+            >
+              Шорт
+            </button>
+          </div>
           <input
             type="number"
             placeholder="Размер, $"
             value={t.size_usd}
             onChange={(e) => setT({ ...t, size_usd: e.target.value })}
           />
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={t.is_open}
-              onChange={(e) => setT({ ...t, is_open: e.target.checked })}
-            />
-            Позиция ещё открыта
-          </label>
-          {!t.is_open && (
-            <>
-              <input
-                type="number"
-                placeholder="Результат, $ (минус если убыток)"
-                value={t.result_usd}
-                onChange={(e) => setT({ ...t, result_usd: e.target.value })}
-              />
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={t.take_by_rule}
-                  onChange={(e) => setT({ ...t, take_by_rule: e.target.checked })}
-                />
-                Зафиксировал по правилу
-              </label>
-            </>
+          <input
+            type="number"
+            placeholder="Цена входа"
+            value={t.entry_price}
+            onChange={(e) => setT({ ...t, entry_price: e.target.value })}
+          />
+          <input
+            type="number"
+            placeholder="Тейк"
+            value={t.take_price}
+            onChange={(e) => setT({ ...t, take_price: e.target.value })}
+          />
+          <input
+            type="number"
+            placeholder="Стоп"
+            value={t.stop_price}
+            onChange={(e) => setT({ ...t, stop_price: e.target.value })}
+          />
+          {plan && plan.r !== null && (
+            <div className="muted" style={{ marginBottom: 10 }}>
+              По плану {fmtR(plan.r)} · риск {fmtUsd(Math.abs(plan.result / plan.r))}
+            </div>
           )}
+          <textarea
+            placeholder="Тезис: почему входишь"
+            value={t.thesis}
+            onChange={(e) => setT({ ...t, thesis: e.target.value })}
+          />
           <label className="check">
             <input
               type="checkbox"
@@ -610,22 +648,9 @@ function Cash({ data, reload, back }) {
             />
             Вход по системе
           </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={t.protected}
-              onChange={(e) => setT({ ...t, protected: e.target.checked })}
-            />
-            Уровни выставлены
-          </label>
-          <textarea
-            placeholder="Что чувствовал"
-            value={t.feeling}
-            onChange={(e) => setT({ ...t, feeling: e.target.value })}
-          />
           {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
-          <button className="btn" disabled={busy} onClick={saveTrade}>
-            Записать
+          <button className="btn" disabled={busy} onClick={openTrade}>
+            Открыть
           </button>
         </div>
       )}
@@ -639,10 +664,7 @@ function Cash({ data, reload, back }) {
             type="number"
             placeholder="Всего в стейбле, $"
             value={bal}
-            onChange={(e) => {
-              setBal(e.target.value);
-              setMsg('');
-            }}
+            onChange={(e) => setBal(e.target.value)}
           />
           {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
           <button className="btn" disabled={busy} onClick={saveBalance}>
@@ -652,42 +674,203 @@ function Cash({ data, reload, back }) {
       )}
 
       <div className="section">
-        <h2>Журнал</h2>
-        {c.trades.length === 0 && (
-          <p className="muted">Пока пусто. Первая запись — сверху.</p>
+        <h2>Открытые позиции</h2>
+        {c.open.length === 0 && <p className="muted">Открытых позиций нет.</p>}
+        {c.open.map((tr) => (
+          <OpenPosition key={tr.id} tr={tr} reload={reload} />
+        ))}
+      </div>
+
+      <div className="section">
+        <h2>История</h2>
+        {c.history.length === 0 && (
+          <p className="muted">Пока пусто. Закрытые сделки приезжают сюда.</p>
         )}
-        {c.trades.map((tr) => (
-          <div className="entry" key={tr.id}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-              <span>{tr.instrument}</span>
-              <span>
-                {tr.is_open
-                  ? 'открыта'
-                  : tr.result_usd === null
-                  ? '—'
-                  : (tr.result_usd > 0 ? '+' : '') +
-                    '$' +
-                    Number(tr.result_usd).toLocaleString('ru-RU')}
-              </span>
-            </div>
-            <div className="meta">
-              {tr.date}
-              {tr.by_system ? ' · по системе' : ' · вне системы'}
-              {!tr.is_open && tr.take_by_rule ? ' · фиксация по правилу' : ''}
-            </div>
-            {tr.is_open && (
-              <button
-                className="link"
-                style={{ marginTop: 6 }}
-                disabled={busy}
-                onClick={() => toggleProtected(tr)}
-              >
-                {tr.protected ? 'Уровни выставлены' : 'Отметить, что уровни выставлены'}
-              </button>
-            )}
-          </div>
+        {c.history.map((tr) => (
+          <Closed key={tr.id} tr={tr} />
         ))}
       </div>
     </>
+  );
+}
+
+function OpenPosition({ tr, reload }) {
+  const [form, setForm] = useState(null); // 'close' | 'levels'
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [x, setX] = useState({
+    exit_price: '',
+    closed_on: TODAY(),
+    take_by_rule: false,
+    review: '',
+  });
+  const [lv, setLv] = useState({
+    stop_price: tr.stop_price ?? '',
+    take_price: tr.take_price ?? '',
+    thesis: tr.thesis ?? '',
+  });
+
+  async function send(kind, payload) {
+    setBusy(true);
+    setMsg('');
+    try {
+      await post(kind, payload);
+      setForm(null);
+      await reload();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const now = preview({ ...tr, price: x.exit_price });
+
+  return (
+    <div className="entry">
+      <div className="line">
+        <span>
+          {tr.instrument} · {DIR[tr.direction] || 'лонг'}
+        </span>
+        <span>{tr.size_usd === null ? '—' : '$' + Number(tr.size_usd).toLocaleString('ru-RU')}</span>
+      </div>
+      <div className="meta">
+        вход {fmtPrice(tr.entry_price)}
+        {tr.take_price !== null && ` · тейк ${fmtPrice(tr.take_price)}`}
+        {tr.stop_price !== null && ` · стоп ${fmtPrice(tr.stop_price)}`}
+        {tr.r_planned !== null && ` · по плану ${fmtR(tr.r_planned)}`}
+      </div>
+      <div className="meta">
+        {tr.date}
+        {tr.by_system ? ' · по системе' : ' · вне системы'}
+      </div>
+      {!tr.is_protected && (
+        <div className="meta warn">Стоп не выставлен — поставить сейчас</div>
+      )}
+      {tr.thesis && <div className="thesis">{tr.thesis}</div>}
+
+      {!form && (
+        <div className="actions">
+          <button className="link" onClick={() => setForm('close')}>
+            Закрыть позицию
+          </button>
+          <button className="link" onClick={() => setForm('levels')}>
+            {tr.is_protected ? 'Подвинуть стоп или тейк' : 'Выставить стоп'}
+          </button>
+        </div>
+      )}
+
+      {form === 'close' && (
+        <div className="form">
+          <input
+            type="number"
+            placeholder="Цена выхода"
+            value={x.exit_price}
+            onChange={(e) => setX({ ...x, exit_price: e.target.value })}
+          />
+          <input
+            type="date"
+            value={x.closed_on}
+            onChange={(e) => setX({ ...x, closed_on: e.target.value })}
+          />
+          {now && (
+            <div className="muted" style={{ marginBottom: 10 }}>
+              Выходит {fmtUsd(now.result)}
+              {now.r !== null && ` · ${fmtR(now.r)}`}
+            </div>
+          )}
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={x.take_by_rule}
+              onChange={(e) => setX({ ...x, take_by_rule: e.target.checked })}
+            />
+            Зафиксировал по правилу
+          </label>
+          <textarea
+            placeholder="Разбор: что сработало, что нет"
+            value={x.review}
+            onChange={(e) => setX({ ...x, review: e.target.value })}
+          />
+          {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
+          <div className="toggle">
+            <button onClick={() => setForm(null)}>Отмена</button>
+            <button
+              className="sel"
+              disabled={busy}
+              onClick={() => send('trade_close', { id: tr.id, ...x })}
+            >
+              Закрыть
+            </button>
+          </div>
+        </div>
+      )}
+
+      {form === 'levels' && (
+        <div className="form">
+          <input
+            type="number"
+            placeholder="Стоп"
+            value={lv.stop_price}
+            onChange={(e) => setLv({ ...lv, stop_price: e.target.value })}
+          />
+          <input
+            type="number"
+            placeholder="Тейк"
+            value={lv.take_price}
+            onChange={(e) => setLv({ ...lv, take_price: e.target.value })}
+          />
+          <textarea
+            placeholder="Тезис"
+            value={lv.thesis}
+            onChange={(e) => setLv({ ...lv, thesis: e.target.value })}
+          />
+          {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
+          <div className="toggle">
+            <button onClick={() => setForm(null)}>Отмена</button>
+            <button
+              className="sel"
+              disabled={busy}
+              onClick={() => send('trade_levels', { id: tr.id, ...lv })}
+            >
+              Сохранить
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Closed({ tr }) {
+  const r = fmtR(tr.r);
+  return (
+    <div className="entry">
+      <div className="line">
+        <span>
+          {tr.instrument} · {DIR[tr.direction] || 'лонг'}
+        </span>
+        <span>
+          {fmtUsd(tr.result_usd)}
+          {r && <span className="muted"> · {r}</span>}
+        </span>
+      </div>
+      <div className="meta">
+        {tr.date}
+        {tr.closed_on && tr.closed_on !== tr.date ? ` → ${tr.closed_on}` : ''}
+        {tr.by_system ? ' · по системе' : ' · вне системы'}
+        {tr.take_by_rule ? ' · фиксация по правилу' : ''}
+      </div>
+      {tr.entry_price !== null && (
+        <div className="meta">
+          вход {fmtPrice(tr.entry_price)} → выход {fmtPrice(tr.exit_price)}
+          {tr.stop_price !== null && ` · стоп ${fmtPrice(tr.stop_price)}`}
+          {tr.size_usd !== null &&
+            ` · размер $${Number(tr.size_usd).toLocaleString('ru-RU')}`}
+        </div>
+      )}
+      {tr.thesis && <div className="thesis">{tr.thesis}</div>}
+      {tr.review && <div className="thesis">{tr.review}</div>}
+    </div>
   );
 }

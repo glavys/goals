@@ -390,3 +390,42 @@ button.btn:disabled {
 .seg button:disabled {
   cursor: default;
 }
+
+/* Журнал сделок */
+
+.entry .line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 500;
+}
+
+.entry .meta.warn {
+  color: var(--red);
+}
+
+.entry .thesis {
+  margin-top: 6px;
+  padding-left: 9px;
+  border-left: 2px solid var(--line-200);
+  color: var(--ink-700);
+  font-size: var(--t-sm);
+  white-space: pre-wrap;
+}
+
+.entry .actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.entry .form {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--paper-sunken);
+  border-radius: var(--r-3);
+}
+
+.entry .form textarea {
+  min-height: 60px;
+}

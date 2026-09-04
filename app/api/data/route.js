@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
-import { db, authed, GYM_TARGET, GYM_MIN_MINUTES } from '../../../lib/db';
+import {
+  db,
+  authed,
+  localDate,
+  shiftDate,
+  mondayOf,
+  daysBetween,
+  tradeMath,
+  GYM_TARGET,
+  GYM_MIN_MINUTES,
+} from '../../../lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,40 +17,25 @@ const SEASON_START = '2026-09-01';
 const SEASON_END = '2026-12-31';
 const PER_WEEK = 3;
 
-function iso(d) {
-  return d.toISOString().slice(0, 10);
-}
-
-function mondayOf(date) {
-  const d = new Date(date + 'T00:00:00Z');
-  const shift = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - shift);
-  return iso(d);
-}
-
-function daysBetween(a, b) {
-  return Math.round(
-    (new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000
-  );
-}
-
 export async function GET() {
   if (!authed()) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const today = iso(new Date());
+  const today = localDate();
   const supabase = db();
 
   const [wRes, tRes, bRes, dRes, sRes] = await Promise.all([
     supabase
       .from('workouts')
+      // Берём с запасом в сутки по краям: в базе время в UTC,
+      // а день считаем по моей таймзоне.
       .select('date, duration')
-      .gte('date', SEASON_START)
-      .lt('date', '2027-01-01'),
+      .gte('date', shiftDate(SEASON_START, -1))
+      .lt('date', '2027-01-02'),
     supabase.from('goals_trades').select('*').order('date', { ascending: false }),
     supabase.from('goals_balance').select('*').order('week_start', { ascending: true }),
-    supabase.from('goals_days').select('*').gte('d', iso(new Date(Date.now() - 40 * 86400000))),
+    supabase.from('goals_days').select('*').gte('d', shiftDate(today, -40)),
     supabase.from('goals_skips').select('*').order('created_at', { ascending: false }).limit(20),
   ]);
 
@@ -54,7 +49,8 @@ export async function GET() {
 
   const sessions = (wRes.data || [])
     .filter((w) => (w.duration || 0) >= GYM_MIN_MINUTES)
-    .map((w) => String(w.date).slice(0, 10))
+    .map((w) => localDate(w.date))
+    .filter((d) => d >= SEASON_START && d <= SEASON_END)
     .sort();
 
   const thisMonday = mondayOf(today);
@@ -67,11 +63,10 @@ export async function GET() {
   }
 
   let streak = 0;
-  let cursor = new Date(thisMonday + 'T00:00:00Z');
-  cursor.setUTCDate(cursor.getUTCDate() - 7);
-  while ((byWeek[iso(cursor)] || 0) >= PER_WEEK) {
+  let cursor = shiftDate(thisMonday, -7);
+  while ((byWeek[cursor] || 0) >= PER_WEEK) {
     streak += 1;
-    cursor.setUTCDate(cursor.getUTCDate() - 7);
+    cursor = shiftDate(cursor, -7);
   }
   if (thisWeek >= PER_WEEK) streak += 1;
 
@@ -97,7 +92,7 @@ export async function GET() {
 
   const days = [];
   for (let i = 29; i >= 0; i--) {
-    const d = iso(new Date(Date.now() - i * 86400000));
+    const d = shiftDate(today, -i);
     const row = dayMap[d] || {};
     days.push({
       d,
@@ -122,29 +117,37 @@ export async function GET() {
     return n;
   }
 
-  const trades = tRes.data || [];
+  const trades = (tRes.data || []).map(tradeMath);
   const open = trades.filter((t) => t.is_open);
+  const history = trades
+    .filter((t) => !t.is_open)
+    .sort((a, b) => (b.closed_on || b.date).localeCompare(a.closed_on || a.date));
+
+  const protectedOpen = open.filter((t) => t.is_protected).length;
 
   const sleep = {
     days,
     morningStreak: tail('morning'),
     eveningStreak: tail('evening'),
     chargeStreak: tail('charge'),
-    protectedOpen: open.filter((t) => t.protected).length,
+    protectedOpen,
     totalOpen: open.length,
   };
 
   const monthStart = today.slice(0, 8) + '01';
   const monthTrades = trades.filter((t) => t.date >= monthStart);
-  const closedMonth = monthTrades.filter((t) => !t.is_open);
+  const closedMonth = history.filter((t) => (t.closed_on || t.date) >= monthStart);
+  const withR = closedMonth.filter((t) => t.r !== null);
   const balances = bRes.data || [];
 
   const cash = {
-    trades,
+    open,
+    history,
     bySystem: monthTrades.filter((t) => t.by_system).length,
     tradesMonth: monthTrades.length,
     takeByRule: closedMonth.filter((t) => t.take_by_rule === true).length,
     closedMonth: closedMonth.length,
+    rMonth: withR.length ? withR.reduce((s, t) => s + t.r, 0) : null,
     balances,
     latest: balances.length ? Number(balances[balances.length - 1].total_usd) : null,
     thisWeekLogged: balances.some((b) => b.week_start === thisMonday),

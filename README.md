@@ -16,7 +16,8 @@ Vercel → Settings → Environment Variables:
 
 ## Установка
 
-1. Supabase → SQL Editor → выполнить `supabase/migrations/20260903_goals.sql`
+1. Supabase → SQL Editor → выполнить по очереди файлы из `supabase/migrations/`
+   в порядке дат: сначала `20260903_goals.sql`, потом `20260904_trade_journal.sql`
 2. Vercel → Add New → Project → выбрать этот репозиторий
 3. Вписать три переменные выше → Deploy
 
