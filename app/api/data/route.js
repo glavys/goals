@@ -103,15 +103,21 @@ export async function GET() {
       d,
       morning: row.morning ?? null,
       evening: row.evening ?? null,
+      charge: row.charge ?? null,
       note: row.note || '',
     });
   }
 
   function tail(key) {
     let n = 0;
+    let started = false;
     for (let i = days.length - 1; i >= 0; i--) {
-      if (days[i][key] === true) n += 1;
-      else break;
+      const v = days[i][key];
+      if (v === null && !started) continue;
+      if (v === true) {
+        n += 1;
+        started = true;
+      } else break;
     }
     return n;
   }
@@ -123,6 +129,7 @@ export async function GET() {
     days,
     morningStreak: tail('morning'),
     eveningStreak: tail('evening'),
+    chargeStreak: tail('charge'),
     protectedOpen: open.filter((t) => t.protected).length,
     totalOpen: open.length,
   };
