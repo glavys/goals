@@ -1,17 +1,20 @@
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap");
+/* Переменные начертания: вес задаётся числом, а не ступенькой. */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..700&display=swap");
 
 :root {
-  --paper: #f5f4f0;
-  --paper-raised: #fefdfb;
-  --paper-sunken: #f0eee8;
+  /* Бумага стала белее: молоко осталось, топлёности убавилось. */
+  --paper: #fbfaf8;
+  --paper-raised: #ffffff;
+  --paper-sunken: #f3f1ed;
 
-  --ink-950: #1a1a1a;
-  --ink-700: #444444;
-  --ink-500: #736a61;
+  /* Чернила темнее — на белом фоне прежние серые выглядели выцветшими. */
+  --ink-950: #141414;
+  --ink-700: #3d3a37;
+  --ink-500: #5f5750;
 
-  --line-200: #e5e3dc;
-  --line-300: #d4d0c8;
-  --line-400: #c4c0b8;
+  --line-200: #e9e7e2;
+  --line-300: #dbd8d2;
+  --line-400: #c7c3bb;
 
   --green: #4f7d5c;
   --red: #b0574f;
@@ -28,11 +31,11 @@
   --t-xl: 22px;
   --t-hero: 32px;
 
-  --r-1: 4px;
-  --r-2: 6px;
-  --r-3: 8px;
-  --r-4: 10px;
-  --r-5: 14px;
+  --r-1: 5px;
+  --r-2: 8px;
+  --r-3: 10px;
+  --r-4: 12px;
+  --r-5: 16px;
   --r-pill: 999px;
 
   --border: 1px solid var(--line-200);
@@ -49,6 +52,10 @@
   --tint-green: color-mix(in srgb, var(--green) 12%, transparent);
   --tint-red: color-mix(in srgb, var(--red) 12%, transparent);
   --tint-ink: color-mix(in srgb, var(--ink-500) 12%, transparent);
+
+  /* Тени почти не видно — они нужны, чтобы карточка отделялась
+     от фона мягко, а не рубленой рамкой. */
+  --lift: 0 1px 2px rgba(20, 18, 16, 0.035), 0 10px 28px -16px rgba(20, 18, 16, 0.09);
 }
 
 * {
@@ -63,9 +70,9 @@ body {
   color: var(--ink-950);
   font-family: var(--font);
   font-size: var(--t-base);
-  font-weight: 400;
+  font-weight: 420;
   line-height: 1.45;
-  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -87,7 +94,7 @@ main {
 
 h1 {
   font-size: var(--t-xl);
-  font-weight: 600;
+  font-weight: 700;
   margin: 0;
   letter-spacing: -0.02em;
 }
@@ -202,7 +209,7 @@ h1 {
 
 .big {
   font-size: var(--t-hero);
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.1;
 }
@@ -223,7 +230,7 @@ h1 {
 
 .stat .value {
   font-size: var(--t-base);
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.01em;
 }
 
@@ -248,7 +255,7 @@ h1 {
 
 .section h2 {
   font-size: var(--t-2xs);
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--ink-500);
@@ -384,6 +391,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   border: 1px solid var(--line-200);
   border-radius: var(--r-5);
   background: var(--paper-raised);
+  box-shadow: var(--lift);
   overflow: hidden;
 }
 
@@ -617,7 +625,8 @@ button.btn:disabled {
 
 .trade.open {
   background: var(--paper-raised);
-  border-bottom-color: var(--line-300);
+  border-bottom-color: transparent;
+  box-shadow: var(--lift);
 }
 
 .trade .body {
@@ -639,7 +648,7 @@ button.btn:disabled {
 }
 
 .trade .ticker {
-  font-weight: 600;
+  font-weight: 700;
   font-size: var(--t-base);
   letter-spacing: -0.01em;
 }
@@ -1084,4 +1093,32 @@ button.btn:disabled {
 
 .form-foot .down {
   color: var(--red);
+}
+
+/* ——— Переход между экранами ——————————————————————— */
+
+.screen {
+  animation: rise 260ms var(--ease) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Точка у пункта списка: где-то нужно действие прямо сейчас. */
+.row .alert {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  vertical-align: middle;
 }

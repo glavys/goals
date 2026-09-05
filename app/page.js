@@ -63,6 +63,12 @@ export default function Page() {
     load();
   }, []);
 
+  // При смене экрана страница возвращается к началу — иначе новый экран
+  // открывается на той же высоте, где ты бросил прошлый.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [view]);
+
   if (needCode) return <Gate onDone={load} />;
 
   if (err)
@@ -86,10 +92,12 @@ export default function Page() {
 
   return (
     <main>
-      {view === 'list' && <List data={data} go={setView} />}
-      {view === 'cash' && <Cash {...shared} />}
-      {view === 'gym' && <Gym {...shared} />}
-      {view === 'sleep' && <Sleep {...shared} />}
+      <div className="screen" key={view}>
+        {view === 'list' && <List data={data} go={setView} />}
+        {view === 'cash' && <Cash {...shared} />}
+        {view === 'gym' && <Gym {...shared} />}
+        {view === 'sleep' && <Sleep {...shared} />}
+      </div>
     </main>
   );
 }
@@ -138,6 +146,9 @@ function Gate({ onDone }) {
 }
 
 function List({ data, go }) {
+  // Единственный повод для красного на главном экране: висит позиция
+  // без стопа. Цифр здесь по-прежнему нет.
+  const needsStop = data.cash.open.some((o) => !o.is_protected);
   return (
     <>
       <div className="head">
@@ -146,7 +157,10 @@ function List({ data, go }) {
       </div>
       <div className="list">
         <button className="row" onClick={() => go('cash')}>
-          <span>Cash</span>
+          <span>
+            Cash
+            {needsStop && <i className="alert" title="Позиция без стопа" />}
+          </span>
           <span className="chev">›</span>
         </button>
         <button className="row" onClick={() => go('gym')}>
