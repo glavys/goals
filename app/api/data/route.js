@@ -139,23 +139,17 @@ export async function GET() {
   const closedMonth = history.filter((t) => (t.closed_on || t.date) >= monthStart);
   const balances = bRes.data || [];
 
-  // Каждая фиксация — отдельное событие, включая частичные продажи
-  // по ещё открытым позициям. Из них и кривая, и результат месяца:
-  // деньги считаются по дате продажи, а не по дате закрытия сделки.
+  // Событие — только полностью закрытая сделка: пока позиция открыта,
+  // результат не считается, сколько бы кусков ни было продано.
   const events = [];
-  for (const t of trades) {
-    if (t.exits.length) {
-      for (const e of t.exits) {
-        events.push({ key: t.id + ':' + e.i, d: e.d, usd: e.usd, instrument: t.instrument });
-      }
-    } else if (!t.is_open && t.result_usd !== null) {
-      events.push({
-        key: t.id + ':old',
-        d: t.closed_on || t.date,
-        usd: t.result_usd,
-        instrument: t.instrument,
-      });
-    }
+  for (const t of history) {
+    if (t.result_usd === null) continue;
+    events.push({
+      key: t.id,
+      d: t.closed_on || t.date,
+      usd: t.result_usd,
+      instrument: t.instrument,
+    });
   }
   events.sort((a, b) => a.d.localeCompare(b.d));
   const monthEvents = events.filter((e) => e.d >= monthStart);

@@ -603,7 +603,7 @@ function Curve({ events, today }) {
           </>
         ) : (
           <>
-            <span className="who">{list.length} фиксаций</span>
+            <span className="who">{list.length} сделок</span>
             <span>пик {fmtUsd(peak)}</span>
             <span className={total >= 0 ? 'up' : 'down'}>итого {fmtUsd(total)}</span>
           </>
@@ -957,20 +957,28 @@ function useSend(reload) {
 }
 
 // Лесенка продаж внутри сделки.
+// Суммы в лесенке появляются только когда позиция закрыта целиком:
+// пока она открыта, результат ещё не сложился.
 function Ladder({ tr, onRemove, busy }) {
   if (!tr.exits.length) return null;
+  const pnl = !tr.is_open;
   return (
     <div className="ladder">
-      <div className="k">Продажи</div>
+      <div className="k">TP</div>
       {tr.exits.map((e) => (
         <div className="sale" key={e.i}>
           <span className="num">{fmtDay(e.d)}</span>
           <span className="num">{fmtQty(e.qty)}</span>
           <span className="muted">по</span>
           <span className="num">{fmtPrice(e.price)}</span>
-          <span className={'num amount' + (e.usd >= 0 ? ' up' : ' down')}>{fmtUsd(e.usd)}</span>
+          {pnl && <span className={'num amount' + (e.usd >= 0 ? ' up' : ' down')}>{fmtUsd(e.usd)}</span>}
           {onRemove && (
-            <button className="x" disabled={busy} onClick={() => onRemove(e.i)} aria-label="Убрать продажу">
+            <button
+              className={'x' + (pnl ? '' : ' push')}
+              disabled={busy}
+              onClick={() => onRemove(e.i)}
+              aria-label="Убрать TP"
+            >
               ✕
             </button>
           )}
@@ -980,9 +988,11 @@ function Ladder({ tr, onRemove, busy }) {
         <div className="sale total">
           <span className="muted">средняя</span>
           <span className="num">{fmtPrice(tr.avg_exit)}</span>
-          <span className={'num amount' + (tr.realized_usd >= 0 ? ' up' : ' down')}>
-            {fmtUsd(tr.realized_usd)}
-          </span>
+          {pnl && (
+            <span className={'num amount' + (tr.realized_usd >= 0 ? ' up' : ' down')}>
+              {fmtUsd(tr.realized_usd)}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -998,11 +1008,6 @@ function OpenPosition({ tr, reload }) {
   const [f, setF] = useState(() => tradeToForm(tr));
 
   const closing = preview({ ...tr, size_usd: tr.left_usd, price: x.exit_price });
-  const sign = tr.direction === 'short' ? -1 : 1;
-  const tpQty = Number(dot(tp.qty));
-  const tpPrice = Number(dot(tp.price));
-  const tpUsd =
-    tpQty > 0 && tpPrice > 0 && tr.entry_price ? tpQty * sign * (tpPrice - tr.entry_price) : null;
   const part = tr.sold_share ? Math.round(tr.sold_share * 100) : 0;
 
   const head = (
@@ -1014,22 +1019,15 @@ function OpenPosition({ tr, reload }) {
           {part > 0 && <Chip>продано {part}%</Chip>}
           {!tr.is_protected && <Chip tone="alarm">без стопа</Chip>}
         </span>
-        <span className="money">{tr.left_usd === null ? '—' : fmtUsd(tr.left_usd, false)}</span>
+        <span className="money">{tr.size_usd === null ? '—' : fmtUsd(tr.size_usd, false)}</span>
       </div>
       <div className="meta">
         <span className="num">{fmtDay(tr.date)}</span>
         <span className="dot">·</span>
         <span>вход</span>
         <span className="num">{fmtPrice(tr.entry_price)}</span>
-        {tr.realized_usd !== null && (
-          <>
-            <span className="dot">·</span>
-            <span>зафиксировано</span>
-            <span className={'num ' + (tr.realized_usd >= 0 ? 'up' : 'down')}>
-              {fmtUsd(tr.realized_usd)}
-            </span>
-          </>
-        )}
+        <span className="dot">·</span>
+        <span>{tr.by_system ? 'по системе' : 'вне системы'}</span>
       </div>
     </>
   );
@@ -1067,7 +1065,7 @@ function OpenPosition({ tr, reload }) {
 
           <div className="actions">
             <button className="btn ghost" onClick={() => setForm('tp')}>
-              Продать часть
+              TP
             </button>
             <button className="btn ghost" onClick={() => setForm('close')}>
               Закрыть
@@ -1104,7 +1102,6 @@ function OpenPosition({ tr, reload }) {
                 продать всё
               </button>
             )}
-            {tpUsd !== null && <span className={tpUsd >= 0 ? 'up' : 'down'}>выйдет {fmtUsd(tpUsd)}</span>}
           </div>
           {msg && <p className="warn form-foot">{msg}</p>}
           <div className="actions">
@@ -1155,7 +1152,11 @@ function OpenPosition({ tr, reload }) {
           </div>
           <div className="form-foot">
             <span>остаток {fmtQty(tr.left_qty)}</span>
-            {closing && <span>выйдет {fmtUsd(closing.result)}</span>}
+            {closing && (
+              <span className={closing.result + (tr.realized_usd || 0) >= 0 ? 'up' : 'down'}>
+                итог сделки {fmtUsd(closing.result + (tr.realized_usd || 0))}
+              </span>
+            )}
           </div>
           {msg && <p className="warn form-foot">{msg}</p>}
           <div className="actions">

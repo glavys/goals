@@ -1012,6 +1012,10 @@ button.btn:disabled {
   padding-top: 8px;
 }
 
+.sale .x.push {
+  margin-left: auto;
+}
+
 .sale .x {
   flex: none;
   width: 22px;
