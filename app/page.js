@@ -514,28 +514,32 @@ function Seg({ value, onChange, options }) {
   );
 }
 
-// ——— Кривая накопленного результата ————————————————————
+// Количество токенов: у мелких монет знаков нужно больше.
+function fmtQty(v) {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  const digits = Math.abs(n) >= 1000 ? 2 : Math.abs(n) >= 1 ? 4 : 8;
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: digits });
+}
 
-function Curve({ history, today }) {
+// ——— Кривая накопленного результата ————————————————————
+// Точка на каждой фиксации, включая частичные продажи по ещё
+// открытым позициям: кривая показывает снятые деньги, а не намерения.
+
+function Curve({ events, today }) {
   const [range, setRange] = useState('all');
   const [sel, setSel] = useState(null);
 
   const monthStart = today.slice(0, 8) + '01';
-  const closed = history
-    .filter((t) => t.result_usd !== null)
-    .filter((t) => range === 'all' || (t.closed_on || t.date) >= monthStart)
-    .slice()
-    .sort((a, b) => (a.closed_on || a.date).localeCompare(b.closed_on || b.date));
-
-  if (closed.length < 2) return null;
+  const list = events.filter((e) => range === 'all' || e.d >= monthStart);
+  if (list.length < 2) return null;
 
   let acc = 0;
-  const pts = closed.map((t, i) => {
-    acc += t.result_usd;
-    return { i, v: acc, t };
-  });
-  pts.unshift({ i: -1, v: 0, t: null });
-  pts.forEach((p, i) => (p.i = i));
+  const pts = [{ v: 0, e: null }];
+  for (const e of list) {
+    acc += e.usd;
+    pts.push({ v: acc, e });
+  }
 
   const W = 560;
   const H = 130;
@@ -543,13 +547,12 @@ function Curve({ history, today }) {
   const hi = Math.max(...pts.map((p) => p.v), 0);
   const lo = Math.min(...pts.map((p) => p.v), 0);
   const span = hi - lo || 1;
-  const x = (p) => (p.i / (pts.length - 1)) * W;
+  const x = (i) => (i / (pts.length - 1)) * W;
   const y = (v) => PAD + (1 - (v - lo) / span) * (H - PAD * 2);
 
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + x(p).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ');
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ');
   const area = `${line} L${W} ${H} L0 ${H} Z`;
-
-  const peak = pts.reduce((a, b) => (b.v > a.v ? b : a));
+  const peak = Math.max(...pts.map((p) => p.v));
   const shown = sel !== null ? pts[sel] : null;
   const total = pts[pts.length - 1].v;
 
@@ -570,20 +573,15 @@ function Curve({ history, today }) {
       <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" onMouseLeave={() => setSel(null)}>
         <path className="fill" d={area} />
         <line className="zero" x1="0" y1={y(0)} x2={W} y2={y(0)} />
-        {peak.v > 0 && <line className="peak" x1="0" y1={y(peak.v)} x2={W} y2={y(peak.v)} />}
+        {peak > 0 && <line className="peak" x1="0" y1={y(peak)} x2={W} y2={y(peak)} />}
         <path className="stroke" d={line} />
         {pts.map((p, i) =>
           i === 0 ? null : (
-            <g key={p.t.id}>
-              <circle
-                className={'dot' + (sel === i ? ' on' : '')}
-                cx={x(p)}
-                cy={y(p.v)}
-                r={sel === i ? 5 : 3.5}
-              />
+            <g key={p.e.key}>
+              <circle className={'dot' + (sel === i ? ' on' : '')} cx={x(i)} cy={y(p.v)} r={sel === i ? 5 : 3.5} />
               <circle
                 className="hit"
-                cx={x(p)}
+                cx={x(i)}
                 cy={y(p.v)}
                 r={16}
                 onMouseEnter={() => setSel(i)}
@@ -598,17 +596,15 @@ function Curve({ history, today }) {
         {shown ? (
           <>
             <span className="who">
-              {shown.t.instrument} · {fmtDay(shown.t.closed_on || shown.t.date)}
+              {shown.e.instrument} · {fmtDay(shown.e.d)}
             </span>
-            <span className={shown.t.result_usd >= 0 ? 'up' : 'down'}>
-              {fmtUsd(shown.t.result_usd)}
-            </span>
+            <span className={shown.e.usd >= 0 ? 'up' : 'down'}>{fmtUsd(shown.e.usd)}</span>
             <span>итого {fmtUsd(shown.v)}</span>
           </>
         ) : (
           <>
-            <span className="who">{closed.length} сделок</span>
-            <span>пик {fmtUsd(peak.v)}</span>
+            <span className="who">{list.length} фиксаций</span>
+            <span>пик {fmtUsd(peak)}</span>
             <span className={total >= 0 ? 'up' : 'down'}>итого {fmtUsd(total)}</span>
           </>
         )}
@@ -667,7 +663,7 @@ function formPayload(f) {
   };
 }
 
-function TradeForm({ value, onChange, closed, edit }) {
+function TradeForm({ value, onChange, closed, edit, hasExits }) {
   const f = value;
   const set = (patch) => onChange({ ...f, ...patch });
 
@@ -699,7 +695,7 @@ function TradeForm({ value, onChange, closed, edit }) {
         <Num k="Стоп" value={f.stop_price} onChange={(e) => set({ stop_price: e.target.value })} />
       </div>
 
-      {closed && (
+      {closed && !hasExits && (
         <div className="g2">
           <Num k="Выход" value={f.exit_price} onChange={(e) => set({ exit_price: e.target.value })} />
           <Field
@@ -827,7 +823,7 @@ function Cash({ data, reload, back }) {
         {c.pnlMonth !== null && <Stat label="Результат месяца" value={fmtUsd(c.pnlMonth)} />}
       </div>
 
-      <Curve history={c.history} today={data.today} />
+      <Curve events={c.events} today={data.today} />
 
       <div className="section">
         <div className="toggle">
@@ -960,14 +956,54 @@ function useSend(reload) {
   return { busy, msg, setMsg, send };
 }
 
+// Лесенка продаж внутри сделки.
+function Ladder({ tr, onRemove, busy }) {
+  if (!tr.exits.length) return null;
+  return (
+    <div className="ladder">
+      <div className="k">Продажи</div>
+      {tr.exits.map((e) => (
+        <div className="sale" key={e.i}>
+          <span className="num">{fmtDay(e.d)}</span>
+          <span className="num">{fmtQty(e.qty)}</span>
+          <span className="muted">по</span>
+          <span className="num">{fmtPrice(e.price)}</span>
+          <span className={'num amount' + (e.usd >= 0 ? ' up' : ' down')}>{fmtUsd(e.usd)}</span>
+          {onRemove && (
+            <button className="x" disabled={busy} onClick={() => onRemove(e.i)} aria-label="Убрать продажу">
+              ✕
+            </button>
+          )}
+        </div>
+      ))}
+      {tr.avg_exit !== null && (
+        <div className="sale total">
+          <span className="muted">средняя</span>
+          <span className="num">{fmtPrice(tr.avg_exit)}</span>
+          <span className={'num amount' + (tr.realized_usd >= 0 ? ' up' : ' down')}>
+            {fmtUsd(tr.realized_usd)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OpenPosition({ tr, reload }) {
   const [open, setOpen] = useState(!tr.is_protected);
-  const [form, setForm] = useState(null); // 'close' | 'edit'
+  const [form, setForm] = useState(null); // 'tp' | 'close' | 'edit'
   const { busy, msg, send } = useSend(reload);
+  const [tp, setTp] = useState({ qty: '', price: '', d: TODAY() });
   const [x, setX] = useState({ exit_price: '', closed_on: TODAY(), take_by_rule: false, review: '' });
   const [f, setF] = useState(() => tradeToForm(tr));
 
-  const now = preview({ ...tr, price: x.exit_price });
+  const closing = preview({ ...tr, size_usd: tr.left_usd, price: x.exit_price });
+  const sign = tr.direction === 'short' ? -1 : 1;
+  const tpQty = Number(dot(tp.qty));
+  const tpPrice = Number(dot(tp.price));
+  const tpUsd =
+    tpQty > 0 && tpPrice > 0 && tr.entry_price ? tpQty * sign * (tpPrice - tr.entry_price) : null;
+  const part = tr.sold_share ? Math.round(tr.sold_share * 100) : 0;
 
   const head = (
     <>
@@ -975,17 +1011,25 @@ function OpenPosition({ tr, reload }) {
         <span className="ident">
           <span className="ticker">{tr.instrument}</span>
           <Chip>{DIR[tr.direction] || DIR.long}</Chip>
+          {part > 0 && <Chip>продано {part}%</Chip>}
           {!tr.is_protected && <Chip tone="alarm">без стопа</Chip>}
         </span>
-        <span className="money">{tr.size_usd === null ? '—' : fmtUsd(tr.size_usd, false)}</span>
+        <span className="money">{tr.left_usd === null ? '—' : fmtUsd(tr.left_usd, false)}</span>
       </div>
       <div className="meta">
         <span className="num">{fmtDay(tr.date)}</span>
         <span className="dot">·</span>
         <span>вход</span>
         <span className="num">{fmtPrice(tr.entry_price)}</span>
-        <span className="dot">·</span>
-        <span>{tr.by_system ? 'по системе' : 'вне системы'}</span>
+        {tr.realized_usd !== null && (
+          <>
+            <span className="dot">·</span>
+            <span>зафиксировано</span>
+            <span className={'num ' + (tr.realized_usd >= 0 ? 'up' : 'down')}>
+              {fmtUsd(tr.realized_usd)}
+            </span>
+          </>
+        )}
       </div>
     </>
   );
@@ -1001,6 +1045,15 @@ function OpenPosition({ tr, reload }) {
             <Level k="Риск" v={tr.risk_usd === null ? '—' : fmtUsd(tr.risk_usd, false)} />
           </div>
 
+          {tr.left_qty !== null && (
+            <p className="note muted">
+              Осталось <b className="num">{fmtQty(tr.left_qty)}</b> из{' '}
+              <span className="num">{fmtQty(tr.qty)}</span> токенов
+            </p>
+          )}
+
+          <Ladder tr={tr} busy={busy} onRemove={(i) => send('trade_tp_remove', { id: tr.id, index: i })} />
+
           {!tr.is_protected && <p className="warn note">Стоп не выставлен — поставить сейчас</p>}
 
           {tr.thesis && (
@@ -1013,9 +1066,14 @@ function OpenPosition({ tr, reload }) {
           {msg && <p className="warn form-foot">{msg}</p>}
 
           <div className="actions">
+            <button className="btn ghost" onClick={() => setForm('tp')}>
+              Продать часть
+            </button>
             <button className="btn ghost" onClick={() => setForm('close')}>
               Закрыть
             </button>
+          </div>
+          <div className="actions">
             <button
               className="btn ghost"
               onClick={() => {
@@ -1026,6 +1084,45 @@ function OpenPosition({ tr, reload }) {
               {tr.is_protected ? 'Изменить' : 'Выставить стоп'}
             </button>
             <DeleteButton busy={busy} onDelete={() => send('trade_delete', { id: tr.id })} />
+          </div>
+        </>
+      )}
+
+      {form === 'tp' && (
+        <>
+          <div className="form">
+            <div className="g2">
+              <Num k="Количество" value={tp.qty} onChange={(e) => setTp({ ...tp, qty: e.target.value })} />
+              <Num k="Цена за токен" value={tp.price} onChange={(e) => setTp({ ...tp, price: e.target.value })} />
+            </div>
+            <Field k="Дата" type="date" value={tp.d} onChange={(e) => setTp({ ...tp, d: e.target.value })} />
+          </div>
+          <div className="form-foot">
+            <span>осталось {fmtQty(tr.left_qty)}</span>
+            {tr.left_qty !== null && (
+              <button className="link" onClick={() => setTp({ ...tp, qty: String(tr.left_qty) })}>
+                продать всё
+              </button>
+            )}
+            {tpUsd !== null && <span className={tpUsd >= 0 ? 'up' : 'down'}>выйдет {fmtUsd(tpUsd)}</span>}
+          </div>
+          {msg && <p className="warn form-foot">{msg}</p>}
+          <div className="actions">
+            <button className="btn ghost" onClick={() => setForm(null)}>
+              Отмена
+            </button>
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() =>
+                send('trade_tp', { id: tr.id, qty: dot(tp.qty), price: dot(tp.price), d: tp.d }, () => {
+                  setTp({ qty: '', price: '', d: TODAY() });
+                  setForm(null);
+                })
+              }
+            >
+              Записать
+            </button>
           </div>
         </>
       )}
@@ -1056,11 +1153,10 @@ function OpenPosition({ tr, reload }) {
             />
             <Field k="Разбор" area value={x.review} onChange={(e) => setX({ ...x, review: e.target.value })} />
           </div>
-          {now && (
-            <div className="form-foot">
-              <span>выходит {fmtUsd(now.result)}</span>
-            </div>
-          )}
+          <div className="form-foot">
+            <span>остаток {fmtQty(tr.left_qty)}</span>
+            {closing && <span>выйдет {fmtUsd(closing.result)}</span>}
+          </div>
           {msg && <p className="warn form-foot">{msg}</p>}
           <div className="actions">
             <button className="btn ghost" onClick={() => setForm(null)}>
@@ -1081,7 +1177,7 @@ function OpenPosition({ tr, reload }) {
 
       {form === 'edit' && (
         <>
-          <TradeForm value={f} onChange={setF} edit />
+          <TradeForm value={f} onChange={setF} edit hasExits={tr.exits.length > 0} />
           {msg && <p className="warn form-foot">{msg}</p>}
           <div className="actions">
             <button className="btn ghost" onClick={() => setForm(null)}>
@@ -1168,10 +1264,17 @@ function Closed({ tr, reload }) {
         <>
           <div className="levels">
             <Level k="Вход" v={fmtPrice(tr.entry_price)} />
-            <Level k="Выход" v={fmtPrice(tr.exit_price)} />
+            <Level
+              k={tr.exits.length > 1 ? 'Средний выход' : 'Выход'}
+              v={fmtPrice(tr.avg_exit !== null ? tr.avg_exit : tr.exit_price)}
+            />
             <Level k="Стоп" v={fmtPrice(tr.stop_price)} />
             <Level k="Размер" v={tr.size_usd === null ? '—' : fmtUsd(tr.size_usd, false)} />
           </div>
+
+          {tr.exits.length > 1 && (
+            <Ladder tr={tr} busy={busy} onRemove={(i) => send('trade_tp_remove', { id: tr.id, index: i })} />
+          )}
           {tr.thesis && (
             <div className="thesis">
               <span className="k">Тезис</span>
@@ -1196,7 +1299,7 @@ function Closed({ tr, reload }) {
 
       {edit && (
         <>
-          <TradeForm value={f} onChange={setF} closed />
+          <TradeForm value={f} onChange={setF} closed edit hasExits={tr.exits.length > 0} />
           {msg && <p className="warn form-foot">{msg}</p>}
           <div className="actions">
             <button className="btn ghost" onClick={() => setEdit(false)}>

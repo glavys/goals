@@ -692,7 +692,7 @@ button.btn:disabled {
   padding-top: 12px;
   border-top: 1px dashed var(--line-300);
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px 8px;
   margin-bottom: 12px;
 }
@@ -961,4 +961,97 @@ button.btn:disabled {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
+}
+
+/* ——— Лесенка частичных продаж ————————————————————— */
+
+.ladder {
+  margin: 10px 0 12px;
+}
+
+.ladder > .k {
+  font-size: var(--t-2xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-950);
+  margin-bottom: 4px;
+}
+
+.sale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: var(--t-sm);
+  border-bottom: 1px dashed var(--line-200);
+}
+
+.sale .num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.sale .amount {
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.sale .up,
+.trade .meta .up {
+  color: var(--green);
+}
+
+.sale .down,
+.trade .meta .down {
+  color: var(--red);
+}
+
+.sale.total {
+  border-bottom: 0;
+  padding-top: 8px;
+}
+
+.sale .x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: none;
+  color: var(--ink-500);
+  font-size: var(--t-2xs);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.sale .x:hover {
+  background: var(--tint-red);
+  color: var(--red);
+}
+
+.sale .x:active {
+  transform: scale(0.88);
+}
+
+.trade .note b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--ink-950);
+}
+
+.form-foot .link {
+  font-family: var(--font);
+  font-size: var(--t-sm);
+}
+
+.form-foot .up {
+  color: var(--green);
+}
+
+.form-foot .down {
+  color: var(--red);
 }

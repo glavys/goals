@@ -137,8 +137,28 @@ export async function GET() {
   const monthStart = today.slice(0, 8) + '01';
   const monthTrades = trades.filter((t) => t.date >= monthStart);
   const closedMonth = history.filter((t) => (t.closed_on || t.date) >= monthStart);
-  const withResult = closedMonth.filter((t) => t.result_usd !== null);
   const balances = bRes.data || [];
+
+  // Каждая фиксация — отдельное событие, включая частичные продажи
+  // по ещё открытым позициям. Из них и кривая, и результат месяца:
+  // деньги считаются по дате продажи, а не по дате закрытия сделки.
+  const events = [];
+  for (const t of trades) {
+    if (t.exits.length) {
+      for (const e of t.exits) {
+        events.push({ key: t.id + ':' + e.i, d: e.d, usd: e.usd, instrument: t.instrument });
+      }
+    } else if (!t.is_open && t.result_usd !== null) {
+      events.push({
+        key: t.id + ':old',
+        d: t.closed_on || t.date,
+        usd: t.result_usd,
+        instrument: t.instrument,
+      });
+    }
+  }
+  events.sort((a, b) => a.d.localeCompare(b.d));
+  const monthEvents = events.filter((e) => e.d >= monthStart);
 
   const cash = {
     open,
@@ -147,9 +167,8 @@ export async function GET() {
     tradesMonth: monthTrades.length,
     takeByRule: closedMonth.filter((t) => t.take_by_rule === true).length,
     closedMonth: closedMonth.length,
-    pnlMonth: withResult.length
-      ? withResult.reduce((sum, t) => sum + t.result_usd, 0)
-      : null,
+    events,
+    pnlMonth: monthEvents.length ? monthEvents.reduce((sum, e) => sum + e.usd, 0) : null,
     balances,
     latest: balances.length ? Number(balances[balances.length - 1].total_usd) : null,
     thisWeekLogged: balances.some((b) => b.week_start === thisMonday),
