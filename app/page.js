@@ -486,7 +486,7 @@ function Chip({ tone, children }) {
 // ни прокрутки колесом, которые меняют число мимо воли.
 function Field({ k, wide, area, ...props }) {
   return (
-    <label className={'cell' + (wide ? ' wide' : '')}>
+    <label className={'fld' + (wide ? ' wide' : '')}>
       <span className="k">{k}</span>
       {area ? <textarea rows={2} {...props} /> : <input {...props} />}
     </label>
@@ -690,14 +690,16 @@ function TradeForm({ value, onChange, closed }) {
         <Field k="Разбор" area value={f.review} onChange={(e) => set({ review: e.target.value })} />
       )}
 
-      <Seg
-        value={f.by_system}
-        onChange={(by_system) => set({ by_system })}
-        options={[
-          [true, 'По системе'],
-          [false, 'Вне системы'],
-        ]}
-      />
+      {closed && (
+        <Seg
+          value={f.by_system}
+          onChange={(by_system) => set({ by_system })}
+          options={[
+            [true, 'По системе'],
+            [false, 'Вне системы'],
+          ]}
+        />
+      )}
 
       {closed && (
         <Seg

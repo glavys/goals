@@ -396,49 +396,52 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   grid-template-columns: 1fr 1fr;
 }
 
-.form .g2 > .cell:nth-child(even) {
+.form .g2 > .fld:nth-child(even) {
   border-left: 1px solid var(--line-200);
 }
 
-.form .g2 > .cell:nth-child(n + 3) {
+.form .g2 > .fld:nth-child(n + 3) {
   border-top: 1px solid var(--line-200);
 }
 
-.form .cell {
+.form .fld {
   display: block;
   padding: 9px 14px 10px;
   min-width: 0;
   cursor: text;
 }
 
-.form .cell .k {
+.form .fld .k {
   display: block;
   font-size: var(--t-2xs);
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--ink-500);
+  color: var(--ink-950);
   margin-bottom: 1px;
 }
 
-.form .cell input,
-.form .cell textarea {
+.form .fld input,
+.form .fld textarea {
   border: 0;
   background: none;
   border-radius: 0;
   padding: 0;
   margin: 0;
   min-height: 0;
+  width: 100%;
   font-size: var(--t-base);
+  font-weight: 500;
   line-height: 1.35;
 }
 
-.form .cell textarea {
+.form .fld textarea {
   resize: none;
   min-height: 40px;
 }
 
-.form .cell input:focus,
-.form .cell textarea:focus {
+.form .fld input:focus,
+.form .fld textarea:focus {
   border: 0;
 }
 
@@ -449,8 +452,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .form .seg2 button {
   flex: 1;
   font: inherit;
-  font-size: var(--t-md);
-  padding: 11px 6px;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  padding: 7px 6px;
   border: 0;
   background: none;
   color: var(--ink-500);
@@ -471,10 +475,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   transform: scale(0.97);
 }
 
+.form .seg2 button {
+  color: var(--ink-700);
+}
+
 .form .seg2 button.sel {
   background: var(--tint-press);
   color: var(--ink-950);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .form-foot {
@@ -484,7 +492,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--t-sm);
-  color: var(--ink-500);
+  font-weight: 500;
+  color: var(--ink-950);
 }
 
 /* ——— Кнопки ——————————————————————————————————————— */
