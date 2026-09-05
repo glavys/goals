@@ -137,7 +137,7 @@ export async function GET() {
   const monthStart = today.slice(0, 8) + '01';
   const monthTrades = trades.filter((t) => t.date >= monthStart);
   const closedMonth = history.filter((t) => (t.closed_on || t.date) >= monthStart);
-  const withR = closedMonth.filter((t) => t.r !== null);
+  const withResult = closedMonth.filter((t) => t.result_usd !== null);
   const balances = bRes.data || [];
 
   const cash = {
@@ -147,7 +147,9 @@ export async function GET() {
     tradesMonth: monthTrades.length,
     takeByRule: closedMonth.filter((t) => t.take_by_rule === true).length,
     closedMonth: closedMonth.length,
-    rMonth: withR.length ? withR.reduce((s, t) => s + t.r, 0) : null,
+    pnlMonth: withResult.length
+      ? withResult.reduce((sum, t) => sum + t.result_usd, 0)
+      : null,
     balances,
     latest: balances.length ? Number(balances[balances.length - 1].total_usd) : null,
     thisWeekLogged: balances.some((b) => b.week_start === thisMonday),

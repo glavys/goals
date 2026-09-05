@@ -70,6 +70,40 @@ export async function POST(request) {
       })
       .eq('id', p.id)
       .eq('is_open', true));
+  } else if (kind === 'trade_edit') {
+    // Правка уже записанной сделки, чаще всего закрытой.
+    if (!p.id) return bad('Не понял, какая сделка');
+    const instrument = (p.instrument || '').trim();
+    const entry = num(p.entry_price);
+    const stop = num(p.stop_price);
+    const direction = p.direction === 'short' ? 'short' : 'long';
+
+    if (!instrument) return bad('Впиши тикер');
+    if (entry === null || entry <= 0) return bad('Впиши цену входа');
+    if (stop !== null && stop <= 0) return bad('Стоп должен быть больше нуля');
+
+    ({ error } = await supabase
+      .from('goals_trades')
+      .update({
+        date: p.date || localDate(),
+        instrument,
+        direction,
+        size_usd: num(p.size_usd),
+        entry_price: entry,
+        take_price: num(p.take_price),
+        stop_price: stop,
+        exit_price: num(p.exit_price),
+        closed_on: p.closed_on || null,
+        thesis: (p.thesis || '').trim() || null,
+        review: (p.review || '').trim() || null,
+        by_system: !!p.by_system,
+        take_by_rule: !!p.take_by_rule,
+        protected: stop !== null,
+      })
+      .eq('id', p.id));
+  } else if (kind === 'trade_delete') {
+    if (!p.id) return bad('Не понял, какая сделка');
+    ({ error } = await supabase.from('goals_trades').delete().eq('id', p.id));
   } else if (kind === 'trade_close') {
     if (!p.id) return bad('Не понял, какая позиция');
     const exit = num(p.exit_price);

@@ -438,38 +438,282 @@ function Sleep({ data, reload, back }) {
 // Цена: у BTC и у мелких монет разный масштаб, поэтому знаки после
 // запятой подбираются под число, а не задаются жёстко.
 function fmtPrice(v) {
-  if (v === null || v === undefined) return '—';
+  if (v === null || v === undefined || v === '') return '—';
   const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
   const digits = Math.abs(n) >= 100 ? 2 : Math.abs(n) >= 1 ? 4 : 8;
   return n.toLocaleString('ru-RU', { maximumFractionDigits: digits });
 }
 
-function fmtUsd(v) {
+function fmtUsd(v, withSign = true) {
   if (v === null || v === undefined) return '—';
   const n = Number(v);
   const s = Math.abs(n).toLocaleString('ru-RU', { maximumFractionDigits: 0 });
+  if (!withSign) return '$' + s;
   return (n > 0 ? '+$' : n < 0 ? '−$' : '$') + s;
 }
 
-function fmtR(r) {
-  if (r === null || r === undefined) return null;
-  return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r).toFixed(1) + 'R';
+function fmtDay(d) {
+  return d ? d.slice(8, 10) + '.' + d.slice(5, 7) : '';
 }
 
-// То же, что tradeMath на сервере, но для живого предпросмотра в форме.
+// Запятая как разделитель — привычнее, но серверу нужна точка.
+function dot(v) {
+  return typeof v === 'string' ? v.replace(',', '.') : v;
+}
+
+const DIR = { long: 'спот бай', short: 'шорт' };
+
+// Что выйдет по этой цене — для живой подсказки в форме.
 function preview({ direction, size_usd, entry_price, stop_price, price }) {
-  const entry = Number(entry_price);
-  const stop = Number(stop_price);
-  const size = Number(size_usd);
-  const p = Number(price);
+  const entry = Number(dot(entry_price));
+  const stop = Number(dot(stop_price));
+  const size = Number(dot(size_usd));
+  const p = Number(dot(price));
   if (!entry || !size || !p) return null;
   const sign = direction === 'short' ? -1 : 1;
-  const result = (size * sign * (p - entry)) / entry;
-  const risk = stop ? Math.abs((size * (entry - stop)) / entry) : null;
-  return { result, r: risk ? result / risk : null };
+  return {
+    result: (size * sign * (p - entry)) / entry,
+    risk: stop ? Math.abs((size * (entry - stop)) / entry) : null,
+  };
 }
 
-const DIR = { long: 'лонг', short: 'шорт' };
+function Chip({ tone, children }) {
+  return <span className={'chip' + (tone ? ' ' + tone : '')}>{children}</span>;
+}
+
+// Поле формы. type="text" с цифровой клавиатурой: у него нет ни стрелок,
+// ни прокрутки колесом, которые меняют число мимо воли.
+function Field({ k, wide, area, ...props }) {
+  return (
+    <label className={'cell' + (wide ? ' wide' : '')}>
+      <span className="k">{k}</span>
+      {area ? <textarea rows={2} {...props} /> : <input {...props} />}
+    </label>
+  );
+}
+
+function Num(props) {
+  return <Field type="text" inputMode="decimal" autoComplete="off" {...props} />;
+}
+
+function Seg({ value, onChange, options }) {
+  return (
+    <div className="seg2">
+      {options.map(([v, label]) => (
+        <button
+          key={String(v)}
+          type="button"
+          className={value === v ? 'sel' : ''}
+          onClick={() => onChange(v)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ——— Кривая накопленного результата ————————————————————
+
+function Curve({ history, today }) {
+  const [range, setRange] = useState('all');
+  const [sel, setSel] = useState(null);
+
+  const monthStart = today.slice(0, 8) + '01';
+  const closed = history
+    .filter((t) => t.result_usd !== null)
+    .filter((t) => range === 'all' || (t.closed_on || t.date) >= monthStart)
+    .slice()
+    .sort((a, b) => (a.closed_on || a.date).localeCompare(b.closed_on || b.date));
+
+  if (closed.length < 2) return null;
+
+  let acc = 0;
+  const pts = closed.map((t, i) => {
+    acc += t.result_usd;
+    return { i, v: acc, t };
+  });
+  pts.unshift({ i: -1, v: 0, t: null });
+  pts.forEach((p, i) => (p.i = i));
+
+  const W = 560;
+  const H = 130;
+  const PAD = 12;
+  const hi = Math.max(...pts.map((p) => p.v), 0);
+  const lo = Math.min(...pts.map((p) => p.v), 0);
+  const span = hi - lo || 1;
+  const x = (p) => (p.i / (pts.length - 1)) * W;
+  const y = (v) => PAD + (1 - (v - lo) / span) * (H - PAD * 2);
+
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + x(p).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ');
+  const area = `${line} L${W} ${H} L0 ${H} Z`;
+
+  const peak = pts.reduce((a, b) => (b.v > a.v ? b : a));
+  const shown = sel !== null ? pts[sel] : null;
+  const total = pts[pts.length - 1].v;
+
+  return (
+    <div className="section">
+      <div className="section-head">
+        <h2>Накопленный результат</h2>
+        <div className="switch">
+          <button className={range === 'month' ? 'sel' : ''} onClick={() => { setRange('month'); setSel(null); }}>
+            Месяц
+          </button>
+          <button className={range === 'all' ? 'sel' : ''} onClick={() => { setRange('all'); setSel(null); }}>
+            Всё
+          </button>
+        </div>
+      </div>
+
+      <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" onMouseLeave={() => setSel(null)}>
+        <path className="fill" d={area} />
+        <line className="zero" x1="0" y1={y(0)} x2={W} y2={y(0)} />
+        {peak.v > 0 && <line className="peak" x1="0" y1={y(peak.v)} x2={W} y2={y(peak.v)} />}
+        <path className="stroke" d={line} />
+        {pts.map((p, i) =>
+          i === 0 ? null : (
+            <g key={p.t.id}>
+              <circle
+                className={'dot' + (sel === i ? ' on' : '')}
+                cx={x(p)}
+                cy={y(p.v)}
+                r={sel === i ? 5 : 3.5}
+              />
+              <circle
+                className="hit"
+                cx={x(p)}
+                cy={y(p.v)}
+                r={16}
+                onMouseEnter={() => setSel(i)}
+                onClick={() => setSel(sel === i ? null : i)}
+              />
+            </g>
+          )
+        )}
+      </svg>
+
+      <div className="spark-foot">
+        {shown ? (
+          <>
+            <span className="who">
+              {shown.t.instrument} · {fmtDay(shown.t.closed_on || shown.t.date)}
+            </span>
+            <span className={shown.t.result_usd >= 0 ? 'up' : 'down'}>
+              {fmtUsd(shown.t.result_usd)}
+            </span>
+            <span>итого {fmtUsd(shown.v)}</span>
+          </>
+        ) : (
+          <>
+            <span className="who">{closed.length} сделок</span>
+            <span>пик {fmtUsd(peak.v)}</span>
+            <span className={total >= 0 ? 'up' : 'down'}>итого {fmtUsd(total)}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ——— Форма сделки ————————————————————————————————————
+
+const BLANK = {
+  date: '',
+  instrument: '',
+  direction: 'long',
+  size_usd: '',
+  entry_price: '',
+  take_price: '',
+  stop_price: '',
+  thesis: '',
+  by_system: true,
+  exit_price: '',
+  closed_on: '',
+  take_by_rule: false,
+  review: '',
+};
+
+function TradeForm({ value, onChange, closed }) {
+  const f = value;
+  const set = (patch) => onChange({ ...f, ...patch });
+
+  return (
+    <div className="form">
+      <div className="g2">
+        <Field
+          k="Тикер"
+          value={f.instrument}
+          onChange={(e) => set({ instrument: e.target.value })}
+          autoComplete="off"
+        />
+        <Field k="Дата" type="date" value={f.date} onChange={(e) => set({ date: e.target.value })} />
+      </div>
+
+      <Seg
+        value={f.direction}
+        onChange={(direction) => set({ direction })}
+        options={[
+          ['long', 'Спот бай'],
+          ['short', 'Шорт'],
+        ]}
+      />
+
+      <div className="g2">
+        <Num k="Размер, $" value={f.size_usd} onChange={(e) => set({ size_usd: e.target.value })} />
+        <Num k="Вход" value={f.entry_price} onChange={(e) => set({ entry_price: e.target.value })} />
+        <Num k="Тейк" value={f.take_price} onChange={(e) => set({ take_price: e.target.value })} />
+        <Num k="Стоп" value={f.stop_price} onChange={(e) => set({ stop_price: e.target.value })} />
+      </div>
+
+      {closed && (
+        <div className="g2">
+          <Num k="Выход" value={f.exit_price} onChange={(e) => set({ exit_price: e.target.value })} />
+          <Field
+            k="Закрыта"
+            type="date"
+            value={f.closed_on}
+            onChange={(e) => set({ closed_on: e.target.value })}
+          />
+        </div>
+      )}
+
+      <Field
+        k="Тезис"
+        area
+        value={f.thesis}
+        onChange={(e) => set({ thesis: e.target.value })}
+      />
+
+      {closed && (
+        <Field k="Разбор" area value={f.review} onChange={(e) => set({ review: e.target.value })} />
+      )}
+
+      <Seg
+        value={f.by_system}
+        onChange={(by_system) => set({ by_system })}
+        options={[
+          [true, 'По системе'],
+          [false, 'Вне системы'],
+        ]}
+      />
+
+      {closed && (
+        <Seg
+          value={f.take_by_rule}
+          onChange={(take_by_rule) => set({ take_by_rule })}
+          options={[
+            [true, 'Фиксация по правилу'],
+            [false, 'Не по правилу'],
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+// ——— Экран ————————————————————————————————————————————
 
 function Cash({ data, reload, back }) {
   const c = data.cash;
@@ -477,26 +721,20 @@ function Cash({ data, reload, back }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [bal, setBal] = useState('');
+  const [t, setT] = useState({ ...BLANK, date: TODAY() });
 
-  const blank = {
-    date: TODAY(),
-    instrument: '',
-    direction: 'long',
-    size_usd: '',
-    entry_price: '',
-    take_price: '',
-    stop_price: '',
-    thesis: '',
-    by_system: true,
-  };
-  const [t, setT] = useState(blank);
-
-  async function openTrade() {
+  async function add() {
     setBusy(true);
     setMsg('');
     try {
-      await post('trade_open', t);
-      setT({ ...blank, date: t.date });
+      await post('trade_open', {
+        ...t,
+        size_usd: dot(t.size_usd),
+        entry_price: dot(t.entry_price),
+        take_price: dot(t.take_price),
+        stop_price: dot(t.stop_price),
+      });
+      setT({ ...BLANK, date: t.date });
       setTab(null);
       await reload();
     } catch (e) {
@@ -510,7 +748,7 @@ function Cash({ data, reload, back }) {
     setBusy(true);
     setMsg('');
     try {
-      await post('balance', { week_start: c.weekStart, total_usd: Number(bal) });
+      await post('balance', { week_start: c.weekStart, total_usd: dot(bal) });
       setBal('');
       setTab(null);
       await reload();
@@ -523,6 +761,7 @@ function Cash({ data, reload, back }) {
 
   const pct = c.latest ? Math.min(100, (c.latest / 50000) * 100) : 0;
   const plan = preview({ ...t, price: t.take_price });
+  const unguarded = c.open.filter((o) => !o.is_protected).length;
 
   return (
     <>
@@ -548,13 +787,13 @@ function Cash({ data, reload, back }) {
         <Stat label="Фиксация по правилу" value={`${c.takeByRule} из ${c.closedMonth}`} />
         <Stat
           label="Позиции под защитой"
-          value={`${c.open.filter((o) => o.is_protected).length} из ${c.open.length}`}
-          warn={c.open.some((o) => !o.is_protected)}
+          value={`${c.open.length - unguarded} из ${c.open.length}`}
+          warn={unguarded > 0}
         />
-        {c.rMonth !== null && (
-          <Stat label="Результат месяца" value={fmtR(c.rMonth)} />
-        )}
+        {c.pnlMonth !== null && <Stat label="Результат месяца" value={fmtUsd(c.pnlMonth)} />}
       </div>
+
+      <Curve history={c.history} today={data.today} />
 
       <div className="section">
         <div className="toggle">
@@ -565,7 +804,7 @@ function Cash({ data, reload, back }) {
               setMsg('');
             }}
           >
-            Открыть позицию
+            Добавить сделку
           </button>
           <button
             className={tab === 'bal' ? 'sel' : ''}
@@ -577,101 +816,41 @@ function Cash({ data, reload, back }) {
             Баланс за неделю
           </button>
         </div>
-      </div>
 
-      {tab === 'trade' && (
-        <div className="section">
-          <input
-            type="date"
-            value={t.date}
-            onChange={(e) => setT({ ...t, date: e.target.value })}
-          />
-          <input
-            type="text"
-            placeholder="Тикер"
-            value={t.instrument}
-            onChange={(e) => setT({ ...t, instrument: e.target.value })}
-          />
-          <div className="toggle" style={{ marginBottom: 10 }}>
-            <button
-              className={t.direction === 'long' ? 'sel' : ''}
-              onClick={() => setT({ ...t, direction: 'long' })}
-            >
-              Лонг
+        {tab === 'trade' && (
+          <>
+            <TradeForm value={t} onChange={setT} />
+            {plan && (
+              <div className="form-foot">
+                {plan.result !== null && <span>план {fmtUsd(plan.result)}</span>}
+                {plan.risk !== null && <span>риск {fmtUsd(plan.risk, false)}</span>}
+              </div>
+            )}
+            {msg && <p className="warn form-foot">{msg}</p>}
+            <button className="btn wide" disabled={busy} onClick={add}>
+              Добавить
             </button>
-            <button
-              className={t.direction === 'short' ? 'sel' : ''}
-              onClick={() => setT({ ...t, direction: 'short' })}
-            >
-              Шорт
-            </button>
-          </div>
-          <input
-            type="number"
-            placeholder="Размер, $"
-            value={t.size_usd}
-            onChange={(e) => setT({ ...t, size_usd: e.target.value })}
-          />
-          <input
-            type="number"
-            placeholder="Цена входа"
-            value={t.entry_price}
-            onChange={(e) => setT({ ...t, entry_price: e.target.value })}
-          />
-          <input
-            type="number"
-            placeholder="Тейк"
-            value={t.take_price}
-            onChange={(e) => setT({ ...t, take_price: e.target.value })}
-          />
-          <input
-            type="number"
-            placeholder="Стоп"
-            value={t.stop_price}
-            onChange={(e) => setT({ ...t, stop_price: e.target.value })}
-          />
-          {plan && plan.r !== null && (
-            <div className="muted" style={{ marginBottom: 10 }}>
-              По плану {fmtR(plan.r)} · риск {fmtUsd(Math.abs(plan.result / plan.r))}
+          </>
+        )}
+
+        {tab === 'bal' && (
+          <>
+            <div className="form">
+              <Field
+                k={`Всего в стейбле, $ · неделя от ${c.weekStart}`}
+                type="text"
+                inputMode="decimal"
+                value={bal}
+                onChange={(e) => setBal(e.target.value)}
+              />
             </div>
-          )}
-          <textarea
-            placeholder="Тезис: почему входишь"
-            value={t.thesis}
-            onChange={(e) => setT({ ...t, thesis: e.target.value })}
-          />
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={t.by_system}
-              onChange={(e) => setT({ ...t, by_system: e.target.checked })}
-            />
-            Вход по системе
-          </label>
-          {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
-          <button className="btn" disabled={busy} onClick={openTrade}>
-            Открыть
-          </button>
-        </div>
-      )}
-
-      {tab === 'bal' && (
-        <div className="section">
-          <div className="muted" style={{ marginBottom: 8 }}>
-            Неделя от {c.weekStart}
-          </div>
-          <input
-            type="number"
-            placeholder="Всего в стейбле, $"
-            value={bal}
-            onChange={(e) => setBal(e.target.value)}
-          />
-          {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
-          <button className="btn" disabled={busy} onClick={saveBalance}>
-            Сохранить
-          </button>
-        </div>
-      )}
+            {msg && <p className="warn form-foot">{msg}</p>}
+            <button className="btn wide" disabled={busy} onClick={saveBalance}>
+              Сохранить
+            </button>
+          </>
+        )}
+      </div>
 
       <div className="section">
         <h2>Открытые позиции</h2>
@@ -687,35 +866,56 @@ function Cash({ data, reload, back }) {
           <p className="muted">Пока пусто. Закрытые сделки приезжают сюда.</p>
         )}
         {c.history.map((tr) => (
-          <Closed key={tr.id} tr={tr} />
+          <Closed key={tr.id} tr={tr} reload={reload} />
         ))}
       </div>
     </>
   );
 }
 
-function OpenPosition({ tr, reload }) {
-  const [form, setForm] = useState(null); // 'close' | 'levels'
+// ——— Строки журнала ————————————————————————————————
+
+function TradeCard({ open, onToggle, head, children }) {
+  return (
+    <div className={'trade' + (open ? ' open' : '')}>
+      <div
+        className="tapzone"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        {head}
+      </div>
+      {open && <div className="body">{children}</div>}
+    </div>
+  );
+}
+
+function Level({ k, v }) {
+  return (
+    <div className="lv">
+      <span className="k">{k}</span>
+      <span className="v">{v}</span>
+    </div>
+  );
+}
+
+function useSend(reload) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [x, setX] = useState({
-    exit_price: '',
-    closed_on: TODAY(),
-    take_by_rule: false,
-    review: '',
-  });
-  const [lv, setLv] = useState({
-    stop_price: tr.stop_price ?? '',
-    take_price: tr.take_price ?? '',
-    thesis: tr.thesis ?? '',
-  });
-
-  async function send(kind, payload) {
+  async function send(kind, payload, after) {
     setBusy(true);
     setMsg('');
     try {
       await post(kind, payload);
-      setForm(null);
+      if (after) after();
       await reload();
     } catch (e) {
       setMsg(e.message);
@@ -723,154 +923,276 @@ function OpenPosition({ tr, reload }) {
       setBusy(false);
     }
   }
+  return { busy, msg, setMsg, send };
+}
+
+function OpenPosition({ tr, reload }) {
+  const [open, setOpen] = useState(!tr.is_protected);
+  const [form, setForm] = useState(null); // 'close' | 'levels'
+  const { busy, msg, send } = useSend(reload);
+  const [x, setX] = useState({ exit_price: '', closed_on: TODAY(), take_by_rule: false, review: '' });
+  const [lv, setLv] = useState({
+    stop_price: tr.stop_price ?? '',
+    take_price: tr.take_price ?? '',
+    thesis: tr.thesis ?? '',
+  });
 
   const now = preview({ ...tr, price: x.exit_price });
 
-  return (
-    <div className="entry">
+  const head = (
+    <>
       <div className="line">
-        <span>
-          {tr.instrument} · {DIR[tr.direction] || 'лонг'}
+        <span className="ident">
+          <span className="ticker">{tr.instrument}</span>
+          <Chip>{DIR[tr.direction] || DIR.long}</Chip>
+          {!tr.is_protected && <Chip tone="alarm">без стопа</Chip>}
         </span>
-        <span>{tr.size_usd === null ? '—' : '$' + Number(tr.size_usd).toLocaleString('ru-RU')}</span>
+        <span className="money">
+          {tr.size_usd === null ? '—' : fmtUsd(tr.size_usd, false)}
+        </span>
       </div>
       <div className="meta">
-        вход {fmtPrice(tr.entry_price)}
-        {tr.take_price !== null && ` · тейк ${fmtPrice(tr.take_price)}`}
-        {tr.stop_price !== null && ` · стоп ${fmtPrice(tr.stop_price)}`}
-        {tr.r_planned !== null && ` · по плану ${fmtR(tr.r_planned)}`}
+        <span className="num">{fmtDay(tr.date)}</span>
+        <span className="dot">·</span>
+        <span>вход</span>
+        <span className="num">{fmtPrice(tr.entry_price)}</span>
+        <span className="dot">·</span>
+        <span>{tr.by_system ? 'по системе' : 'вне системы'}</span>
       </div>
-      <div className="meta">
-        {tr.date}
-        {tr.by_system ? ' · по системе' : ' · вне системы'}
+    </>
+  );
+
+  return (
+    <TradeCard open={open} onToggle={() => setOpen(!open)} head={head}>
+      <div className="levels">
+        <Level k="Вход" v={fmtPrice(tr.entry_price)} />
+        <Level k="Тейк" v={fmtPrice(tr.take_price)} />
+        <Level k="Стоп" v={fmtPrice(tr.stop_price)} />
+        <Level k="Риск" v={tr.risk_usd === null ? '—' : fmtUsd(tr.risk_usd, false)} />
       </div>
+
       {!tr.is_protected && (
-        <div className="meta warn">Стоп не выставлен — поставить сейчас</div>
+        <p className="warn note">Стоп не выставлен — поставить сейчас</p>
       )}
-      {tr.thesis && <div className="thesis">{tr.thesis}</div>}
+
+      {tr.thesis && (
+        <div className="thesis">
+          <span className="k">Тезис</span>
+          {tr.thesis}
+        </div>
+      )}
 
       {!form && (
         <div className="actions">
-          <button className="link" onClick={() => setForm('close')}>
-            Закрыть позицию
+          <button className="btn ghost" onClick={() => setForm('close')}>
+            Закрыть
           </button>
-          <button className="link" onClick={() => setForm('levels')}>
-            {tr.is_protected ? 'Подвинуть стоп или тейк' : 'Выставить стоп'}
+          <button className="btn ghost" onClick={() => setForm('levels')}>
+            {tr.is_protected ? 'Стоп и тейк' : 'Выставить стоп'}
           </button>
+          <DeleteButton busy={busy} onDelete={() => send('trade_delete', { id: tr.id })} />
         </div>
       )}
 
       {form === 'close' && (
         <div className="form">
-          <input
-            type="number"
-            placeholder="Цена выхода"
-            value={x.exit_price}
-            onChange={(e) => setX({ ...x, exit_price: e.target.value })}
-          />
-          <input
-            type="date"
-            value={x.closed_on}
-            onChange={(e) => setX({ ...x, closed_on: e.target.value })}
-          />
-          {now && (
-            <div className="muted" style={{ marginBottom: 10 }}>
-              Выходит {fmtUsd(now.result)}
-              {now.r !== null && ` · ${fmtR(now.r)}`}
-            </div>
-          )}
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={x.take_by_rule}
-              onChange={(e) => setX({ ...x, take_by_rule: e.target.checked })}
-            />
-            Зафиксировал по правилу
-          </label>
-          <textarea
-            placeholder="Разбор: что сработало, что нет"
-            value={x.review}
-            onChange={(e) => setX({ ...x, review: e.target.value })}
-          />
-          {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
-          <div className="toggle">
-            <button onClick={() => setForm(null)}>Отмена</button>
-            <button
-              className="sel"
-              disabled={busy}
-              onClick={() => send('trade_close', { id: tr.id, ...x })}
-            >
-              Закрыть
-            </button>
+          <div className="g2">
+            <Num k="Цена выхода" value={x.exit_price} onChange={(e) => setX({ ...x, exit_price: e.target.value })} />
+            <Field k="Дата" type="date" value={x.closed_on} onChange={(e) => setX({ ...x, closed_on: e.target.value })} />
           </div>
+          <Seg
+            value={x.take_by_rule}
+            onChange={(take_by_rule) => setX({ ...x, take_by_rule })}
+            options={[
+              [true, 'Фиксация по правилу'],
+              [false, 'Не по правилу'],
+            ]}
+          />
+          <Field k="Разбор" area value={x.review} onChange={(e) => setX({ ...x, review: e.target.value })} />
         </div>
       )}
 
       {form === 'levels' && (
         <div className="form">
-          <input
-            type="number"
-            placeholder="Стоп"
-            value={lv.stop_price}
-            onChange={(e) => setLv({ ...lv, stop_price: e.target.value })}
-          />
-          <input
-            type="number"
-            placeholder="Тейк"
-            value={lv.take_price}
-            onChange={(e) => setLv({ ...lv, take_price: e.target.value })}
-          />
-          <textarea
-            placeholder="Тезис"
-            value={lv.thesis}
-            onChange={(e) => setLv({ ...lv, thesis: e.target.value })}
-          />
-          {msg && <p className="warn" style={{ fontSize: 13 }}>{msg}</p>}
-          <div className="toggle">
-            <button onClick={() => setForm(null)}>Отмена</button>
+          <div className="g2">
+            <Num k="Стоп" value={lv.stop_price} onChange={(e) => setLv({ ...lv, stop_price: e.target.value })} />
+            <Num k="Тейк" value={lv.take_price} onChange={(e) => setLv({ ...lv, take_price: e.target.value })} />
+          </div>
+          <Field k="Тезис" area value={lv.thesis} onChange={(e) => setLv({ ...lv, thesis: e.target.value })} />
+        </div>
+      )}
+
+      {form === 'close' && now && (
+        <div className="form-foot">
+          <span>выходит {fmtUsd(now.result)}</span>
+        </div>
+      )}
+      {msg && <p className="warn form-foot">{msg}</p>}
+
+      {form && (
+        <div className="actions">
+          <button className="btn ghost" onClick={() => setForm(null)}>
+            Отмена
+          </button>
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() =>
+              form === 'close'
+                ? send('trade_close', { id: tr.id, ...x, exit_price: dot(x.exit_price) }, () => setForm(null))
+                : send(
+                    'trade_levels',
+                    { id: tr.id, ...lv, stop_price: dot(lv.stop_price), take_price: dot(lv.take_price) },
+                    () => setForm(null)
+                  )
+            }
+          >
+            {form === 'close' ? 'Закрыть сделку' : 'Сохранить'}
+          </button>
+        </div>
+      )}
+    </TradeCard>
+  );
+}
+
+function DeleteButton({ busy, onDelete }) {
+  const [armed, setArmed] = useState(false);
+  if (!armed) {
+    return (
+      <button className="btn ghost danger" onClick={() => setArmed(true)}>
+        Удалить
+      </button>
+    );
+  }
+  return (
+    <>
+      <button className="btn ghost" onClick={() => setArmed(false)}>
+        Отмена
+      </button>
+      <button className="btn danger" disabled={busy} onClick={onDelete}>
+        Точно удалить
+      </button>
+    </>
+  );
+}
+
+function Closed({ tr, reload }) {
+  const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const { busy, msg, send } = useSend(reload);
+  const [f, setF] = useState({
+    ...BLANK,
+    date: tr.date || '',
+    instrument: tr.instrument || '',
+    direction: tr.direction || 'long',
+    size_usd: tr.size_usd ?? '',
+    entry_price: tr.entry_price ?? '',
+    take_price: tr.take_price ?? '',
+    stop_price: tr.stop_price ?? '',
+    thesis: tr.thesis || '',
+    by_system: !!tr.by_system,
+    exit_price: tr.exit_price ?? '',
+    closed_on: tr.closed_on || tr.date || '',
+    take_by_rule: !!tr.take_by_rule,
+    review: tr.review || '',
+  });
+
+  const win = tr.result_usd !== null && tr.result_usd > 0;
+  const lose = tr.result_usd !== null && tr.result_usd < 0;
+
+  const head = (
+    <>
+      <div className="line">
+        <span className="ident">
+          <span className="ticker">{tr.instrument}</span>
+          <Chip>{DIR[tr.direction] || DIR.long}</Chip>
+        </span>
+        <span className={'money' + (win ? ' up' : lose ? ' down' : '')}>{fmtUsd(tr.result_usd)}</span>
+      </div>
+      <div className="meta">
+        <span className="num">{fmtDay(tr.date)}</span>
+        {tr.closed_on && tr.closed_on !== tr.date && (
+          <>
+            <span className="dot">→</span>
+            <span className="num">{fmtDay(tr.closed_on)}</span>
+          </>
+        )}
+        <span className="dot">·</span>
+        <span>{tr.by_system ? 'по системе' : 'вне системы'}</span>
+        {tr.take_by_rule && (
+          <>
+            <span className="dot">·</span>
+            <span>фиксация по правилу</span>
+          </>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <TradeCard open={open} onToggle={() => setOpen(!open)} head={head}>
+      {!edit && (
+        <>
+          <div className="levels">
+            <Level k="Вход" v={fmtPrice(tr.entry_price)} />
+            <Level k="Выход" v={fmtPrice(tr.exit_price)} />
+            <Level k="Стоп" v={fmtPrice(tr.stop_price)} />
+            <Level k="Размер" v={tr.size_usd === null ? '—' : fmtUsd(tr.size_usd, false)} />
+          </div>
+          {tr.thesis && (
+            <div className="thesis">
+              <span className="k">Тезис</span>
+              {tr.thesis}
+            </div>
+          )}
+          {tr.review && (
+            <div className="thesis">
+              <span className="k">Разбор</span>
+              {tr.review}
+            </div>
+          )}
+          {msg && <p className="warn form-foot">{msg}</p>}
+          <div className="actions">
+            <button className="btn ghost" onClick={() => setEdit(true)}>
+              Изменить
+            </button>
+            <DeleteButton busy={busy} onDelete={() => send('trade_delete', { id: tr.id })} />
+          </div>
+        </>
+      )}
+
+      {edit && (
+        <>
+          <TradeForm value={f} onChange={setF} closed />
+          {msg && <p className="warn form-foot">{msg}</p>}
+          <div className="actions">
+            <button className="btn ghost" onClick={() => setEdit(false)}>
+              Отмена
+            </button>
             <button
-              className="sel"
+              className="btn"
               disabled={busy}
-              onClick={() => send('trade_levels', { id: tr.id, ...lv })}
+              onClick={() =>
+                send(
+                  'trade_edit',
+                  {
+                    id: tr.id,
+                    ...f,
+                    size_usd: dot(f.size_usd),
+                    entry_price: dot(f.entry_price),
+                    take_price: dot(f.take_price),
+                    stop_price: dot(f.stop_price),
+                    exit_price: dot(f.exit_price),
+                  },
+                  () => setEdit(false)
+                )
+              }
             >
               Сохранить
             </button>
           </div>
-        </div>
+        </>
       )}
-    </div>
-  );
-}
-
-function Closed({ tr }) {
-  const r = fmtR(tr.r);
-  return (
-    <div className="entry">
-      <div className="line">
-        <span>
-          {tr.instrument} · {DIR[tr.direction] || 'лонг'}
-        </span>
-        <span>
-          {fmtUsd(tr.result_usd)}
-          {r && <span className="muted"> · {r}</span>}
-        </span>
-      </div>
-      <div className="meta">
-        {tr.date}
-        {tr.closed_on && tr.closed_on !== tr.date ? ` → ${tr.closed_on}` : ''}
-        {tr.by_system ? ' · по системе' : ' · вне системы'}
-        {tr.take_by_rule ? ' · фиксация по правилу' : ''}
-      </div>
-      {tr.entry_price !== null && (
-        <div className="meta">
-          вход {fmtPrice(tr.entry_price)} → выход {fmtPrice(tr.exit_price)}
-          {tr.stop_price !== null && ` · стоп ${fmtPrice(tr.stop_price)}`}
-          {tr.size_usd !== null &&
-            ` · размер $${Number(tr.size_usd).toLocaleString('ru-RU')}`}
-        </div>
-      )}
-      {tr.thesis && <div className="thesis">{tr.thesis}</div>}
-      {tr.review && <div className="thesis">{tr.review}</div>}
-    </div>
+    </TradeCard>
   );
 }
