@@ -635,7 +635,39 @@ const BLANK = {
   review: '',
 };
 
-function TradeForm({ value, onChange, closed }) {
+// Разложить запись из базы обратно в поля формы.
+function tradeToForm(tr) {
+  return {
+    ...BLANK,
+    date: tr.date || '',
+    instrument: tr.instrument || '',
+    direction: tr.direction || 'long',
+    size_usd: tr.size_usd ?? '',
+    entry_price: tr.entry_price ?? '',
+    take_price: tr.take_price ?? '',
+    stop_price: tr.stop_price ?? '',
+    thesis: tr.thesis || '',
+    by_system: !!tr.by_system,
+    exit_price: tr.exit_price ?? '',
+    closed_on: tr.closed_on || tr.date || '',
+    take_by_rule: !!tr.take_by_rule,
+    review: tr.review || '',
+  };
+}
+
+// Числа уходят на сервер с точкой вместо запятой.
+function formPayload(f) {
+  return {
+    ...f,
+    size_usd: dot(f.size_usd),
+    entry_price: dot(f.entry_price),
+    take_price: dot(f.take_price),
+    stop_price: dot(f.stop_price),
+    exit_price: dot(f.exit_price),
+  };
+}
+
+function TradeForm({ value, onChange, closed, edit }) {
   const f = value;
   const set = (patch) => onChange({ ...f, ...patch });
 
@@ -690,7 +722,7 @@ function TradeForm({ value, onChange, closed }) {
         <Field k="Разбор" area value={f.review} onChange={(e) => set({ review: e.target.value })} />
       )}
 
-      {closed && (
+      {(closed || edit) && (
         <Seg
           value={f.by_system}
           onChange={(by_system) => set({ by_system })}
@@ -930,14 +962,10 @@ function useSend(reload) {
 
 function OpenPosition({ tr, reload }) {
   const [open, setOpen] = useState(!tr.is_protected);
-  const [form, setForm] = useState(null); // 'close' | 'levels'
+  const [form, setForm] = useState(null); // 'close' | 'edit'
   const { busy, msg, send } = useSend(reload);
   const [x, setX] = useState({ exit_price: '', closed_on: TODAY(), take_by_rule: false, review: '' });
-  const [lv, setLv] = useState({
-    stop_price: tr.stop_price ?? '',
-    take_price: tr.take_price ?? '',
-    thesis: tr.thesis ?? '',
-  });
+  const [f, setF] = useState(() => tradeToForm(tr));
 
   const now = preview({ ...tr, price: x.exit_price });
 
@@ -949,9 +977,7 @@ function OpenPosition({ tr, reload }) {
           <Chip>{DIR[tr.direction] || DIR.long}</Chip>
           {!tr.is_protected && <Chip tone="alarm">без стопа</Chip>}
         </span>
-        <span className="money">
-          {tr.size_usd === null ? '—' : fmtUsd(tr.size_usd, false)}
-        </span>
+        <span className="money">{tr.size_usd === null ? '—' : fmtUsd(tr.size_usd, false)}</span>
       </div>
       <div className="meta">
         <span className="num">{fmtDay(tr.date)}</span>
@@ -966,92 +992,112 @@ function OpenPosition({ tr, reload }) {
 
   return (
     <TradeCard open={open} onToggle={() => setOpen(!open)} head={head}>
-      <div className="levels">
-        <Level k="Вход" v={fmtPrice(tr.entry_price)} />
-        <Level k="Тейк" v={fmtPrice(tr.take_price)} />
-        <Level k="Стоп" v={fmtPrice(tr.stop_price)} />
-        <Level k="Риск" v={tr.risk_usd === null ? '—' : fmtUsd(tr.risk_usd, false)} />
-      </div>
-
-      {!tr.is_protected && (
-        <p className="warn note">Стоп не выставлен — поставить сейчас</p>
-      )}
-
-      {tr.thesis && (
-        <div className="thesis">
-          <span className="k">Тезис</span>
-          {tr.thesis}
-        </div>
-      )}
-
       {!form && (
-        <div className="actions">
-          <button className="btn ghost" onClick={() => setForm('close')}>
-            Закрыть
-          </button>
-          <button className="btn ghost" onClick={() => setForm('levels')}>
-            {tr.is_protected ? 'Стоп и тейк' : 'Выставить стоп'}
-          </button>
-          <DeleteButton busy={busy} onDelete={() => send('trade_delete', { id: tr.id })} />
-        </div>
+        <>
+          <div className="levels">
+            <Level k="Вход" v={fmtPrice(tr.entry_price)} />
+            <Level k="Тейк" v={fmtPrice(tr.take_price)} />
+            <Level k="Стоп" v={fmtPrice(tr.stop_price)} />
+            <Level k="Риск" v={tr.risk_usd === null ? '—' : fmtUsd(tr.risk_usd, false)} />
+          </div>
+
+          {!tr.is_protected && <p className="warn note">Стоп не выставлен — поставить сейчас</p>}
+
+          {tr.thesis && (
+            <div className="thesis">
+              <span className="k">Тезис</span>
+              {tr.thesis}
+            </div>
+          )}
+
+          {msg && <p className="warn form-foot">{msg}</p>}
+
+          <div className="actions">
+            <button className="btn ghost" onClick={() => setForm('close')}>
+              Закрыть
+            </button>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setF(tradeToForm(tr));
+                setForm('edit');
+              }}
+            >
+              {tr.is_protected ? 'Изменить' : 'Выставить стоп'}
+            </button>
+            <DeleteButton busy={busy} onDelete={() => send('trade_delete', { id: tr.id })} />
+          </div>
+        </>
       )}
 
       {form === 'close' && (
-        <div className="form">
-          <div className="g2">
-            <Num k="Цена выхода" value={x.exit_price} onChange={(e) => setX({ ...x, exit_price: e.target.value })} />
-            <Field k="Дата" type="date" value={x.closed_on} onChange={(e) => setX({ ...x, closed_on: e.target.value })} />
+        <>
+          <div className="form">
+            <div className="g2">
+              <Num
+                k="Цена выхода"
+                value={x.exit_price}
+                onChange={(e) => setX({ ...x, exit_price: e.target.value })}
+              />
+              <Field
+                k="Дата"
+                type="date"
+                value={x.closed_on}
+                onChange={(e) => setX({ ...x, closed_on: e.target.value })}
+              />
+            </div>
+            <Seg
+              value={x.take_by_rule}
+              onChange={(take_by_rule) => setX({ ...x, take_by_rule })}
+              options={[
+                [true, 'Фиксация по правилу'],
+                [false, 'Не по правилу'],
+              ]}
+            />
+            <Field k="Разбор" area value={x.review} onChange={(e) => setX({ ...x, review: e.target.value })} />
           </div>
-          <Seg
-            value={x.take_by_rule}
-            onChange={(take_by_rule) => setX({ ...x, take_by_rule })}
-            options={[
-              [true, 'Фиксация по правилу'],
-              [false, 'Не по правилу'],
-            ]}
-          />
-          <Field k="Разбор" area value={x.review} onChange={(e) => setX({ ...x, review: e.target.value })} />
-        </div>
-      )}
-
-      {form === 'levels' && (
-        <div className="form">
-          <div className="g2">
-            <Num k="Стоп" value={lv.stop_price} onChange={(e) => setLv({ ...lv, stop_price: e.target.value })} />
-            <Num k="Тейк" value={lv.take_price} onChange={(e) => setLv({ ...lv, take_price: e.target.value })} />
+          {now && (
+            <div className="form-foot">
+              <span>выходит {fmtUsd(now.result)}</span>
+            </div>
+          )}
+          {msg && <p className="warn form-foot">{msg}</p>}
+          <div className="actions">
+            <button className="btn ghost" onClick={() => setForm(null)}>
+              Отмена
+            </button>
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() =>
+                send('trade_close', { id: tr.id, ...x, exit_price: dot(x.exit_price) }, () => setForm(null))
+              }
+            >
+              Закрыть сделку
+            </button>
           </div>
-          <Field k="Тезис" area value={lv.thesis} onChange={(e) => setLv({ ...lv, thesis: e.target.value })} />
-        </div>
+        </>
       )}
 
-      {form === 'close' && now && (
-        <div className="form-foot">
-          <span>выходит {fmtUsd(now.result)}</span>
-        </div>
-      )}
-      {msg && <p className="warn form-foot">{msg}</p>}
-
-      {form && (
-        <div className="actions">
-          <button className="btn ghost" onClick={() => setForm(null)}>
-            Отмена
-          </button>
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() =>
-              form === 'close'
-                ? send('trade_close', { id: tr.id, ...x, exit_price: dot(x.exit_price) }, () => setForm(null))
-                : send(
-                    'trade_levels',
-                    { id: tr.id, ...lv, stop_price: dot(lv.stop_price), take_price: dot(lv.take_price) },
-                    () => setForm(null)
-                  )
-            }
-          >
-            {form === 'close' ? 'Закрыть сделку' : 'Сохранить'}
-          </button>
-        </div>
+      {form === 'edit' && (
+        <>
+          <TradeForm value={f} onChange={setF} edit />
+          {msg && <p className="warn form-foot">{msg}</p>}
+          <div className="actions">
+            <button className="btn ghost" onClick={() => setForm(null)}>
+              Отмена
+            </button>
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() =>
+                send('trade_edit', { id: tr.id, ...formPayload(f), exit_price: '' }, () => setForm(null))
+              }
+            >
+              Сохранить
+            </button>
+          </div>
+        </>
       )}
     </TradeCard>
   );
@@ -1082,22 +1128,7 @@ function Closed({ tr, reload }) {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(false);
   const { busy, msg, send } = useSend(reload);
-  const [f, setF] = useState({
-    ...BLANK,
-    date: tr.date || '',
-    instrument: tr.instrument || '',
-    direction: tr.direction || 'long',
-    size_usd: tr.size_usd ?? '',
-    entry_price: tr.entry_price ?? '',
-    take_price: tr.take_price ?? '',
-    stop_price: tr.stop_price ?? '',
-    thesis: tr.thesis || '',
-    by_system: !!tr.by_system,
-    exit_price: tr.exit_price ?? '',
-    closed_on: tr.closed_on || tr.date || '',
-    take_by_rule: !!tr.take_by_rule,
-    review: tr.review || '',
-  });
+  const [f, setF] = useState(() => tradeToForm(tr));
 
   const win = tr.result_usd !== null && tr.result_usd > 0;
   const lose = tr.result_usd !== null && tr.result_usd < 0;
@@ -1175,19 +1206,7 @@ function Closed({ tr, reload }) {
               className="btn"
               disabled={busy}
               onClick={() =>
-                send(
-                  'trade_edit',
-                  {
-                    id: tr.id,
-                    ...f,
-                    size_usd: dot(f.size_usd),
-                    entry_price: dot(f.entry_price),
-                    take_price: dot(f.take_price),
-                    stop_price: dot(f.stop_price),
-                    exit_price: dot(f.exit_price),
-                  },
-                  () => setEdit(false)
-                )
+                send('trade_edit', { id: tr.id, ...formPayload(f) }, () => setEdit(false))
               }
             >
               Сохранить

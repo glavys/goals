@@ -32,13 +32,6 @@ export async function POST(request) {
 
     if (!instrument) return bad('Впиши тикер');
     if (entry === null || entry <= 0) return bad('Впиши цену входа');
-    if (stop !== null && stop <= 0) return bad('Стоп должен быть больше нуля');
-    if (stop !== null && direction === 'long' && stop >= entry) {
-      return bad('В лонге стоп ставится ниже входа');
-    }
-    if (stop !== null && direction === 'short' && stop <= entry) {
-      return bad('В шорте стоп ставится выше входа');
-    }
 
     ({ error } = await supabase.from('goals_trades').insert({
       date: p.date || localDate(),
@@ -54,22 +47,6 @@ export async function POST(request) {
       protected: stop !== null,
       feeling: (p.feeling || '').trim() || null,
     }));
-  } else if (kind === 'trade_levels') {
-    // Подвинуть стоп или тейк, поправить тезис у открытой позиции.
-    if (!p.id) return bad('Не понял, какая позиция');
-    const stop = num(p.stop_price);
-    if (stop !== null && stop <= 0) return bad('Стоп должен быть больше нуля');
-
-    ({ error } = await supabase
-      .from('goals_trades')
-      .update({
-        stop_price: stop,
-        take_price: num(p.take_price),
-        thesis: (p.thesis || '').trim() || null,
-        protected: stop !== null,
-      })
-      .eq('id', p.id)
-      .eq('is_open', true));
   } else if (kind === 'trade_edit') {
     // Правка уже записанной сделки, чаще всего закрытой.
     if (!p.id) return bad('Не понял, какая сделка');
@@ -80,7 +57,6 @@ export async function POST(request) {
 
     if (!instrument) return bad('Впиши тикер');
     if (entry === null || entry <= 0) return bad('Впиши цену входа');
-    if (stop !== null && stop <= 0) return bad('Стоп должен быть больше нуля');
 
     ({ error } = await supabase
       .from('goals_trades')
