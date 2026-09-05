@@ -9,6 +9,17 @@ const TODAY = () => {
     .slice(0, 10);
 };
 
+// «5 сентября» — дата словами, без года. Полдень по UTC, чтобы часовой
+// пояс не сдвинул её на сутки.
+function longDate(d) {
+  if (!d) return '';
+  return new Date(d + 'T12:00:00Z').toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  });
+}
+
 async function post(kind, payload) {
   const res = await fetch('/api/log', {
     method: 'POST',
@@ -298,25 +309,35 @@ function Sleep({ data, reload, back }) {
   const [note, setNote] = useState('');
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Отметка встаёт сразу, не дожидаясь сервера: иначе тумблер кажется
+  // залипшим на те полсекунды, пока идёт запрос.
+  const [pending, setPending] = useState({});
+
+  const val = (key) => (key in pending ? pending[key] : todayRow[key] ?? null);
 
   useEffect(() => {
     if (!dirty) setNote(todayRow.note || '');
   }, [todayRow.note, dirty]);
 
-  async function mark(key, val) {
-    setBusy(true);
+  async function mark(key, v) {
+    const next = val(key) === v ? null : v;
+    setPending((p) => ({ ...p, [key]: next }));
     try {
       await post('day', {
         d: today,
-        morning: todayRow.morning ?? null,
-        evening: todayRow.evening ?? null,
-        charge: todayRow.charge ?? null,
+        morning: val('morning'),
+        evening: val('evening'),
+        charge: val('charge'),
         note: todayRow.note ?? null,
-        [key]: todayRow[key] === val ? null : val,
+        [key]: next,
       });
       await reload();
     } finally {
-      setBusy(false);
+      setPending((p) => {
+        const rest = { ...p };
+        delete rest[key];
+        return rest;
+      });
     }
   }
 
@@ -354,23 +375,22 @@ function Sleep({ data, reload, back }) {
       </div>
 
       <div className="section" style={{ marginTop: 0 }}>
-        <h2>Сегодня</h2>
+        <div className="section-head">
+          <h2>Сегодня</h2>
+          <span className="when">{longDate(data.today)}</span>
+        </div>
         {rows.map(([key, label]) => (
           <div className="day-row" key={key}>
             <span className="name">{label}</span>
-            <div className="seg">
-              <button
-                disabled={busy}
-                className={todayRow[key] === true ? 'yes' : ''}
-                onClick={() => mark(key, true)}
-              >
+            <div
+              className="seg"
+              data-v={val(key) === true ? 'yes' : val(key) === false ? 'no' : 'none'}
+            >
+              <span className="thumb" aria-hidden="true" />
+              <button onClick={() => mark(key, true)} aria-pressed={val(key) === true}>
                 Да
               </button>
-              <button
-                disabled={busy}
-                className={todayRow[key] === false ? 'no' : ''}
-                onClick={() => mark(key, false)}
-              >
+              <button onClick={() => mark(key, false)} aria-pressed={val(key) === false}>
                 Нет
               </button>
             </div>

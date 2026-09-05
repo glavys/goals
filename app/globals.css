@@ -910,50 +910,76 @@ button.btn:disabled {
 }
 
 .seg {
+  position: relative;
   display: flex;
-  border: 1px solid var(--line-300);
-  border-radius: var(--r-3);
-  overflow: hidden;
   flex: none;
+  padding: 3px;
+  border: 1px solid var(--line-200);
+  border-radius: var(--r-pill);
+  background: var(--paper-sunken);
+}
+
+/* Ползунок ездит между половинами — он и есть отклик на нажатие. */
+.seg .thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  height: calc(100% - 6px);
+  border-radius: var(--r-pill);
+  background: var(--paper-raised);
+  border: 1px solid var(--line-300);
+  opacity: 0;
+  transform: translateX(0);
+  transition: transform 240ms var(--ease), background 160ms var(--ease),
+    border-color 160ms var(--ease), opacity 160ms var(--ease);
+}
+
+.seg[data-v='yes'] .thumb {
+  opacity: 1;
+  transform: translateX(0);
+  background: var(--ink-950);
+  border-color: var(--ink-950);
+}
+
+.seg[data-v='no'] .thumb {
+  opacity: 1;
+  transform: translateX(100%);
 }
 
 .seg button {
-  font: inherit;
-  font-size: var(--t-md);
-  font-weight: 500;
-  padding: 8px 16px;
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-width: 58px;
+  padding: 8px 12px;
   border: 0;
-  background: var(--paper-raised);
+  border-radius: var(--r-pill);
+  background: none;
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 500;
   color: var(--ink-500);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
+  transition: color 160ms var(--ease);
 }
 
-.seg button + button {
-  border-left: 1px solid var(--line-300);
+.seg button:hover {
+  color: var(--ink-700);
 }
 
-.seg button:hover:not(:disabled) {
-  background: var(--tint-hover);
-}
-
-.seg button:active:not(:disabled) {
-  transform: scale(0.94);
-}
-
-.seg button.yes {
-  background: var(--ink-950);
+.seg[data-v='yes'] button:first-of-type {
   color: var(--paper);
 }
 
-.seg button.no {
-  background: var(--line-400);
-  color: var(--paper);
+.seg[data-v='no'] button:last-of-type {
+  color: var(--ink-950);
 }
 
-.seg button:disabled {
-  cursor: default;
+.section-head .when {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  color: var(--ink-500);
 }
 
 @media (prefers-reduced-motion: reduce) {
